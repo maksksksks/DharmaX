@@ -19,17 +19,17 @@
 #include "iot_button.h"
 #include "button_gpio.h"
 
-#include "demos/lv_demos.h"
-
 #include "lvgl_ui.h"
+
+#include "app_events.h"
+#include "drv_battery.h"
+#include "svc_battery_monitor.h"
+#include "svc_ble_sync.h"
 
 #define EXAMPLE_DISPLAY_ROTATION 0
 
 #define EXAMPLE_LCD_H_RES (172)
 #define EXAMPLE_LCD_V_RES (320)
-
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (50)
-#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (1)
 
 static char *TAG = "WristWatch";
 
@@ -45,11 +45,11 @@ static lv_indev_t *lvgl_touch_indev = NULL;
 void lv_fs_fatfs_init(void);
 static esp_err_t app_lvgl_init(void);
 static void button_init(void);
-static void touch_test(void);
 
 void app_main(void) {
     i2c_master_bus_handle_t i2c_bus_handle;
-    // Initialize NVS
+    
+    // 1. Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -57,22 +57,36 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
+    // 2. Базовая периферия (I2C, Датчики)
     i2c_bus_handle = bsp_i2c_init();
     bsp_battery_init();
     bsp_photores_init();
-    bsp_wifi_init_start(NULL, NULL);
-    bsp_display_init(&io_handle, &panel_handle, EXAMPLE_LCD_H_RES * EXAMPLE_LCD_DRAW_BUFF_HEIGHT);
+    
+    // 3. Экран и Тач (Забираем SPI шину)
+    bsp_display_init(&io_handle, &panel_handle, EXAMPLE_LCD_H_RES * 100);
     bsp_touch_init(&touch_handle, i2c_bus_handle, EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, EXAMPLE_DISPLAY_ROTATION);
-    bsp_sdcard_init();
+    
+    // 4. LVGL (Выделяем буферы в PSRAM. Теперь нам плевать, сколько памяти съест Wi-Fi потом)
     ESP_ERROR_CHECK(app_lvgl_init());
+    bsp_display_brightness_init();
+    bsp_display_set_brightness(80);
+
+    // 5. SD Карта (Инициализируем ПОСЛЕ LVGL, чтобы не сломать SPI коллбеки экрана)
+    bsp_sdcard_init();
     lv_fs_fatfs_init();
 
-    bsp_display_brightness_init();
-    bsp_display_set_brightness(100);
+    // 6. Wi-Fi (Вызываем ДО наших сервисов! Он сам создаст Event Loop, мы избежим краша Waveshare кода)
+    //bsp_wifi_init_start(NULL, NULL);
+    svc_ble_sync_start();
 
+    // 7. Наша архитектура (Event Loop УЖЕ создан Wi-Fi-ем, батарея будет работать без ошибок)
+    drv_battery_init();
+    svc_battery_monitor_start();
+
+    // 8. Кнопки
     button_init();
-    // touch_test();
 
+    // 9. Запуск UI
     if (lvgl_port_lock(0)) {
         lvgl_ui_init();
         lvgl_port_unlock();
@@ -83,11 +97,11 @@ static esp_err_t app_lvgl_init(void)
 {
     /* Initialize LVGL */
     const lvgl_port_cfg_t lvgl_cfg = {
-        .task_priority = 4,       /* LVGL task priority */
-        .task_stack = 1024 * 10,  /* LVGL task stack size */
-        .task_affinity = -1,      /* LVGL task pinned to core (-1 is no affinity) */
-        .task_max_sleep_ms = 500, /* Maximum sleep in LVGL task */
-        .timer_period_ms = 5      /* LVGL timer tick period in ms */
+        .task_priority = 4,       
+        .task_stack = 1024 * 10,  
+        .task_affinity = -1,      
+        .task_max_sleep_ms = 500, 
+        .timer_period_ms = 5      
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port initialization failed");
 
@@ -96,20 +110,19 @@ static esp_err_t app_lvgl_init(void)
     lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
-        .buffer_size = EXAMPLE_LCD_H_RES * EXAMPLE_LCD_DRAW_BUFF_HEIGHT,
-        .double_buffer = EXAMPLE_LCD_DRAW_BUFF_DOUBLE,
+        .buffer_size = EXAMPLE_LCD_H_RES * 100, // Безопасный размер
+        .double_buffer = true,                  // Двойная буферизация
         .hres = EXAMPLE_LCD_H_RES,
         .vres = EXAMPLE_LCD_V_RES,
         .monochrome = false,
-        /* Rotation values must be same as used in esp_lcd for initial settings of the screen */
         .rotation = {
             .swap_xy = false,
             .mirror_x = false,
             .mirror_y = false,
         },
         .flags = {
-            .buff_spiram = false,
-            .buff_dma = true,
+            .buff_spiram = true,  // ВКЛЮЧАЕМ PSRAM (Wi-Fi оставил нам мало внутренней памяти)
+            .buff_dma = false,    // ВЫКЛЮЧАЕМ DMA (DMA не работает с PSRAM напрямую)
         }};
 
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 34, 0));
@@ -117,7 +130,7 @@ static esp_err_t app_lvgl_init(void)
 
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
 
-    /* Add touch input (for selected screen) */
+    /* Add touch input */
     const lvgl_port_touch_cfg_t touch_cfg = {
         .disp = lvgl_disp,
         .handle = touch_handle,
@@ -127,13 +140,10 @@ static esp_err_t app_lvgl_init(void)
     return ESP_OK;
 }
 
-static bool touch_test_done = false;
-
 static void button_event_cb(void *arg, void *data)
 {
     button_event_t event = iot_button_get_event((button_handle_t)arg);
     ESP_LOGI(TAG, "%s", iot_button_get_event_str(event));
-    touch_test_done = true;
 }
 
 static void button_init(void)
@@ -145,8 +155,4 @@ static void button_init(void)
     static button_handle_t btn = NULL;
     ESP_ERROR_CHECK(iot_button_new_gpio_device(&btn_cfg, &btn_gpio_cfg, &btn));
     iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, NULL, button_event_cb, NULL);
-    // iot_button_register_cb(btn, BUTTON_LONG_PRESS_START, NULL, button_event_cb, NULL);
-    // iot_button_register_cb(btn, BUTTON_LONG_PRESS_HOLD, NULL, button_event_cb, NULL);
-    // iot_button_register_cb(btn, BUTTON_LONG_PRESS_UP, NULL, button_event_cb, NULL);
-    // iot_button_register_cb(btn, BUTTON_PRESS_END, NULL, button_event_cb, NULL);
 }

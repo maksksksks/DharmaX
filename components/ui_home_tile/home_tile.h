@@ -1,7 +1,7 @@
 #ifndef __HOME_TILE_H__
 #define __HOME_TILE_H__
 
-#include "../lvgl_ui.h"
+#include "lvgl.h"
 
 
 #ifdef __cplusplus
