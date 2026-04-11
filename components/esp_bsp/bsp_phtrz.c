@@ -1,4 +1,4 @@
-#include "bsp_photores.h"
+#include "bsp_phtrz.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -28,7 +28,7 @@ static bool adc_photo_calibration_init(adc_unit_t unit, adc_channel_t channel, a
     return calibrated;
 }
 
-void bsp_photores_init(void) {
+void bsp_phtrz_init(void) {
     adc_oneshot_unit_init_cfg_t init_config1 = {
         .unit_id = ADC_UNIT_PHOTO,
     };
@@ -45,7 +45,7 @@ void bsp_photores_init(void) {
     do_calibration1_chan0 = adc_photo_calibration_init(ADC_UNIT_PHOTO, ADC_CHANNEL_PHOTO, ADC_ATTEN_PHOTO, &adc1_cali_chan0_handle);
 }
 
-void bsp_photores_get_voltage(int *voltage) {
+void bsp_phtrz_get_voltage(int *voltage) {
     int adc_raw;
     int voltage_int = 0;
     

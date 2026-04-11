@@ -11,4 +11,7 @@ idf_component_register(
         drv_battery        # ДОБАВИЛИ
         svc_battery_monitor # ДОБАВИЛИ
         svc_ble_sync
+        drv_phtrz
+        svc_lighting_monitor
+        svc_auto_brightness
 )

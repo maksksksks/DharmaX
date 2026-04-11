@@ -10,8 +10,8 @@
 extern "C" {
 #endif
 
-void bsp_photores_init(void);
-void bsp_photores_get_voltage(int *voltage);
+void bsp_phtrz_init(void);
+void bsp_phtrz_get_voltage(int *voltage);
 
 #ifdef __cplusplus
 }

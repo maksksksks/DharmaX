@@ -14,7 +14,7 @@
 #include "bsp_wifi.h"
 #include "bsp_sdcard.h"
 #include "bsp_battery.h"
-#include "bsp_photores.h"
+#include "bsp_phtrz.h"
 
 #include "iot_button.h"
 #include "button_gpio.h"
@@ -22,9 +22,16 @@
 #include "lvgl_ui.h"
 
 #include "app_events.h"
+
 #include "drv_battery.h"
 #include "svc_battery_monitor.h"
+
 #include "svc_ble_sync.h"
+
+#include "drv_phtrz.h"
+#include "svc_lighting_monitor.h"
+
+#include "svc_auto_brightness.h"
 
 #define EXAMPLE_DISPLAY_ROTATION 0
 
@@ -49,7 +56,9 @@ static void button_init(void);
 void app_main(void) {
     i2c_master_bus_handle_t i2c_bus_handle;
     
+    // ==========================================
     // 1. Initialize NVS
+    // ==========================================
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -57,40 +66,79 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
+    // ==========================================
+    // 1.5 ★★★ СОЗДАЕМ EVENT LOOP ★★★ 
+    //     (раньше это делал Wi-Fi, но он закомментирован!)
+    // ==========================================
+    esp_err_t event_ret = esp_event_loop_create_default();
+    if (event_ret == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(TAG, "Event loop already exists (OK)");
+    } else {
+        ESP_ERROR_CHECK(event_ret);  // Если другая ошибка - крашимся с логом
+    }
+    ESP_LOGI(TAG, "✅ Event Loop ready");
+
+    // ==========================================
     // 2. Базовая периферия (I2C, Датчики)
+    // ==========================================
     i2c_bus_handle = bsp_i2c_init();
     bsp_battery_init();
-    bsp_photores_init();
+    bsp_phtrz_init();
     
-    // 3. Экран и Тач (Забираем SPI шину)
+    // ==========================================
+    // 3. Экран и Тач
+    // ==========================================
     bsp_display_init(&io_handle, &panel_handle, EXAMPLE_LCD_H_RES * 100);
     bsp_touch_init(&touch_handle, i2c_bus_handle, EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, EXAMPLE_DISPLAY_ROTATION);
     
-    // 4. LVGL (Выделяем буферы в PSRAM. Теперь нам плевать, сколько памяти съест Wi-Fi потом)
+    // ==========================================
+    // 4. LVGL
+    // ==========================================
     ESP_ERROR_CHECK(app_lvgl_init());
     bsp_display_brightness_init();
     bsp_display_set_brightness(80);
 
-    // 5. SD Карта (Инициализируем ПОСЛЕ LVGL, чтобы не сломать SPI коллбеки экрана)
+    // ==========================================
+    // 5. SD Карта
+    // ==========================================
     bsp_sdcard_init();
     lv_fs_fatfs_init();
 
-    // 6. Wi-Fi (Вызываем ДО наших сервисов! Он сам создаст Event Loop, мы избежим краша Waveshare кода)
-    //bsp_wifi_init_start(NULL, NULL);
+    // ==========================================
+    // 6. BLE
+    // ==========================================
     svc_ble_sync_start();
 
-    // 7. Наша архитектура (Event Loop УЖЕ создан Wi-Fi-ем, батарея будет работать без ошибок)
+    // ==========================================
+    // 7. Инициализация драйверов (без запуска задач!)
+    // ==========================================
     drv_battery_init();
-    svc_battery_monitor_start();
-
-    // 8. Кнопки
-    button_init();
-
-    // 9. Запуск UI
+    
+    // ==========================================
+    // 8. ★★ ЗАПУСК UI (здесь регистрируются обработчики событий!) ★★
+    // ==========================================
     if (lvgl_port_lock(0)) {
-        lvgl_ui_init();
+        lvgl_ui_init();  // ← Тут вызывается home_tile_init() → esp_event_handler_instance_register()
         lvgl_port_unlock();
     }
+    ESP_LOGI(TAG, "✅ UI created, event handlers registered");
+
+    // ==========================================
+    // 9. ★★ ЗАПУСК ФОНОВЫХ ЗАДАЧ (только после UI!) ★★
+    // ==========================================
+    svc_battery_monitor_start();      // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
+    svc_lighting_monitor_start();     // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
+    svc_auto_brightness_start();
+    ESP_LOGI(TAG, "✅ Background tasks started (now event handlers are ready)");
+
+    
+
+    // ==========================================
+    // 10. Кнопки
+    // ==========================================
+    button_init();
+
+    ESP_LOGI(TAG, "🚀 System fully initialized!");
 }
 
 static esp_err_t app_lvgl_init(void)

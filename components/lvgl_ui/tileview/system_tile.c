@@ -3,7 +3,7 @@
 #include "bsp_sdcard.h"
 #include "bsp_display.h"
 #include "bsp_battery.h"
-#include "bsp_photores.h"
+// #include "bsp_phtrz.h"
 
 #include "esp_flash.h"
 #include "esp_psram.h"
@@ -61,7 +61,7 @@ static void system_time_cb(lv_timer_t *timer) {
     char str[20];
     float tsens_out;
     float voltage;
-    int photo;
+    // int photo;
     bsp_battery_get_voltage(&voltage, NULL);
     sprintf(str, "%.2f V", voltage);
     lv_label_set_text(label_battery, str);
@@ -74,10 +74,9 @@ static void system_time_cb(lv_timer_t *timer) {
     sprintf(str, "%d C", (int)ds18_last_temp);
     lv_label_set_text(label_ds18_temp, str);
 
-    lv_label_set_text(label_ds18_temp, str);
-    bsp_photores_get_voltage(&photo);
-    sprintf(str, "%d", photo);
-    lv_label_set_text(label_photores, str);
+    // bsp_photores_get_voltage(&photo);
+    // sprintf(str, "%d", photo);
+    // lv_label_set_text(label_photores, str);
 }
 
 void ds18_init() {
@@ -179,9 +178,9 @@ void system_tile_init(lv_obj_t *parent) {
     label_battery = lv_label_create(list_item);
     lv_label_set_text(label_battery, "--- V");
 
-    list_item = lv_list_add_btn(list, NULL, "Photores");
-    label_photores = lv_label_create(list_item);
-    lv_label_set_text(label_photores, "----");
+    // list_item = lv_list_add_btn(list, NULL, "Photores");
+    // label_photores = lv_label_create(list_item);
+    // lv_label_set_text(label_photores, "----");
 
     temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
     temperature_sensor_install(&temp_sensor_config, &temp_sensor);

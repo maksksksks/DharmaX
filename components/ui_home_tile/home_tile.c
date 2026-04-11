@@ -21,6 +21,7 @@ lv_obj_t *ui_LabelTimeHH;
 lv_obj_t *ui_LabelTimeMM;
 lv_obj_t *ui_LabelTimeSS;
 lv_obj_t *ui_LabelBattery;
+lv_obj_t *ui_LabelLighting;
 
 int dateTime[7];
 
@@ -36,6 +37,18 @@ static void ui_battery_event_handler(void* arg, esp_event_base_t base,
         snprintf(buf, sizeof(buf), "%d%%\n%.2fV", bat->percent, bat->voltage);
         
         lv_label_set_text(ui_LabelBattery, buf);
+    }
+}
+
+static void ui_lighting_event_handler(void* arg, esp_event_base_t base, 
+                                    int32_t id, void* event_data) {
+    if (id == EVT_LIGHT_UPDATED) {
+        lighting_data_t *light = (lighting_data_t*) event_data;
+        
+        char buf[6];
+        snprintf(buf, sizeof(buf), "%d", light->value);
+        
+        lv_label_set_text(ui_LabelLighting, buf);
     }
 }
 
@@ -150,7 +163,7 @@ void home_tile_create_objects(void)
     ui_LabelTimeSS = lv_label_create(obj_home_tile);
     lv_obj_set_width(ui_LabelTimeSS, LV_SIZE_CONTENT);
     lv_obj_set_height(ui_LabelTimeSS, LV_SIZE_CONTENT);
-    lv_obj_set_x(ui_LabelTimeSS, 28);
+    lv_obj_set_x(ui_LabelTimeSS, 20);
     lv_obj_set_y(ui_LabelTimeSS, -103);
     lv_obj_set_align(ui_LabelTimeSS, LV_ALIGN_CENTER);
     lv_obj_set_style_text_color(ui_LabelTimeSS, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -165,6 +178,16 @@ void home_tile_create_objects(void)
     // Устанавливаем заглушку, реальное значение придет через 5 секунд от фоновой задачи
     lv_label_set_text(ui_LabelBattery, "--%\n--V"); 
     lv_obj_set_style_text_color(ui_LabelBattery, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LabelLighting = lv_label_create(obj_home_tile);
+    lv_obj_set_width(ui_LabelLighting, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_LabelLighting, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_LabelLighting, 63);
+    lv_obj_set_y(ui_LabelLighting, -111);
+    lv_obj_set_align(ui_LabelLighting, LV_ALIGN_CENTER);
+    // Устанавливаем заглушку, реальное значение придет через 5 секунд от фоновой задачи
+    lv_label_set_text(ui_LabelLighting, "---"); 
+    lv_obj_set_style_text_color(ui_LabelLighting, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 // =========================================================
@@ -186,4 +209,8 @@ void home_tile_init(lv_obj_t *parent)
     esp_event_handler_instance_t battery_handler;
     esp_event_handler_instance_register(APP_EVENTS, EVT_BATTERY_UPDATED, 
                                        ui_battery_event_handler, NULL, &battery_handler);
+
+    esp_event_handler_instance_t lighting_handler;
+    esp_event_handler_instance_register(APP_EVENTS, EVT_LIGHT_UPDATED, 
+                                       ui_lighting_event_handler, NULL, &lighting_handler);
 }
