@@ -14,4 +14,5 @@ idf_component_register(SRCS ${SRC_FILES}
                         "espressif__esp_lvgl_port" 
                         "ui_rgb_tile" 
                         "ui_home_tile"
+                        "ui_settings_tile"
                         )

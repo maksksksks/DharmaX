@@ -95,7 +95,7 @@ void bsp_display_set_brightness(uint8_t brightness)
     ESP_ERROR_CHECK(ledc_set_duty(LCD_BL_LEDC_MODE, LCD_BL_LEDC_CHANNEL, duty));
     ESP_ERROR_CHECK(ledc_update_duty(LCD_BL_LEDC_MODE, LCD_BL_LEDC_CHANNEL));
 
-    ESP_LOGI(TAG, "LCD brightness set to %d%%", brightness);
+    //ESP_LOGI(TAG, "LCD brightness set to %d%%", brightness);
 }
 
 uint8_t bsp_display_get_brightness(void)

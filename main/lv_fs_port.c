@@ -8,13 +8,11 @@
  *********************/
 #include "lvgl.h"
 
-
 #define FS_FATFS 1
 #if FS_FATFS
-    #define FS_FATFS_LETTER 'S'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
-    #define FS_FATFS_CACHE_SIZE 20 * 1024   /*>0 to cache this number of bytes in lv_fs_read()*/
+#define FS_FATFS_LETTER 'S'           /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
+#define FS_FATFS_CACHE_SIZE 20 * 1024 /*>0 to cache this number of bytes in lv_fs_read()*/
 #endif
-
 
 #if FS_FATFS
 #include "ff.h"
@@ -24,7 +22,7 @@
  *********************/
 
 #if FS_FATFS_LETTER == '\0'
-    #error "FS_FATFS_LETTER must be an upper case ASCII letter"
+#error "FS_FATFS_LETTER must be an upper case ASCII letter"
 #endif
 
 /**********************
@@ -36,15 +34,15 @@
  **********************/
 static void fs_init(void);
 
-static void * fs_open(lv_fs_drv_t * drv, const char * path, lv_fs_mode_t mode);
-static lv_fs_res_t fs_close(lv_fs_drv_t * drv, void * file_p);
-static lv_fs_res_t fs_read(lv_fs_drv_t * drv, void * file_p, void * buf, uint32_t btr, uint32_t * br);
-static lv_fs_res_t fs_write(lv_fs_drv_t * drv, void * file_p, const void * buf, uint32_t btw, uint32_t * bw);
-static lv_fs_res_t fs_seek(lv_fs_drv_t * drv, void * file_p, uint32_t pos, lv_fs_whence_t whence);
-static lv_fs_res_t fs_tell(lv_fs_drv_t * drv, void * file_p, uint32_t * pos_p);
-static void * fs_dir_open(lv_fs_drv_t * drv, const char * path);
-static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * dir_p, char * fn);
-static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * dir_p);
+static void *fs_open(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode);
+static lv_fs_res_t fs_close(lv_fs_drv_t *drv, void *file_p);
+static lv_fs_res_t fs_read(lv_fs_drv_t *drv, void *file_p, void *buf, uint32_t btr, uint32_t *br);
+static lv_fs_res_t fs_write(lv_fs_drv_t *drv, void *file_p, const void *buf, uint32_t btw, uint32_t *bw);
+static lv_fs_res_t fs_seek(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence);
+static lv_fs_res_t fs_tell(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p);
+static void *fs_dir_open(lv_fs_drv_t *drv, const char *path);
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *dir_p, char *fn);
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t *drv, void *dir_p);
 
 /**********************
  *  STATIC VARIABLES
@@ -58,8 +56,7 @@ static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * dir_p);
  *   GLOBAL FUNCTIONS
  **********************/
 
-void lv_fs_fatfs_init(void)
-{
+void lv_fs_fatfs_init(void) {
     /*----------------------------------------------------
      * Initialize your storage device and File System
      * -------------------------------------------------*/
@@ -96,8 +93,7 @@ void lv_fs_fatfs_init(void)
  **********************/
 
 /*Initialize your Storage device and File system.*/
-static void fs_init(void)
-{
+static void fs_init(void) {
     /*Initialize the SD card and FatFS itself.
      *Better to do it in your code to keep this library untouched for easy updating*/
 }
@@ -109,23 +105,25 @@ static void fs_init(void)
  * @param mode read: FS_MODE_RD, write: FS_MODE_WR, both: FS_MODE_RD | FS_MODE_WR
  * @return pointer to FIL struct or NULL in case of fail
  */
-static void * fs_open(lv_fs_drv_t * drv, const char * path, lv_fs_mode_t mode)
-{
+static void *fs_open(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode) {
     LV_UNUSED(drv);
     uint8_t flags = 0;
 
-    if(mode == LV_FS_MODE_WR) flags = FA_WRITE | FA_OPEN_ALWAYS;
-    else if(mode == LV_FS_MODE_RD) flags = FA_READ;
-    else if(mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = FA_READ | FA_WRITE | FA_OPEN_ALWAYS;
+    if (mode == LV_FS_MODE_WR)
+        flags = FA_WRITE | FA_OPEN_ALWAYS;
+    else if (mode == LV_FS_MODE_RD)
+        flags = FA_READ;
+    else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD))
+        flags = FA_READ | FA_WRITE | FA_OPEN_ALWAYS;
 
-    FIL * f = (FIL *)lv_mem_alloc(sizeof(FIL));
-    if(f == NULL) return NULL;
+    FIL *f = (FIL *)lv_mem_alloc(sizeof(FIL));
+    if (f == NULL)
+        return NULL;
 
     FRESULT res = f_open(f, path, flags);
-    if(res == FR_OK) {
+    if (res == FR_OK) {
         return f;
-    }
-    else {
+    } else {
         lv_mem_free(f);
         return NULL;
     }
@@ -138,8 +136,7 @@ static void * fs_open(lv_fs_drv_t * drv, const char * path, lv_fs_mode_t mode)
  * @return LV_FS_RES_OK: no error, the file is read
  *         any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_close(lv_fs_drv_t * drv, void * file_p)
-{
+static lv_fs_res_t fs_close(lv_fs_drv_t *drv, void *file_p) {
     LV_UNUSED(drv);
     f_close((FIL *)file_p);
     lv_mem_free(file_p);
@@ -156,12 +153,13 @@ static lv_fs_res_t fs_close(lv_fs_drv_t * drv, void * file_p)
  * @return LV_FS_RES_OK: no error, the file is read
  *         any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_read(lv_fs_drv_t * drv, void * file_p, void * buf, uint32_t btr, uint32_t * br)
-{
+static lv_fs_res_t fs_read(lv_fs_drv_t *drv, void *file_p, void *buf, uint32_t btr, uint32_t *br) {
     LV_UNUSED(drv);
     FRESULT res = f_read((FIL *)file_p, buf, btr, (UINT *)br);
-    if(res == FR_OK) return LV_FS_RES_OK;
-    else return LV_FS_RES_UNKNOWN;
+    if (res == FR_OK)
+        return LV_FS_RES_OK;
+    else
+        return LV_FS_RES_UNKNOWN;
 }
 
 /**
@@ -173,12 +171,13 @@ static lv_fs_res_t fs_read(lv_fs_drv_t * drv, void * file_p, void * buf, uint32_
  * @param bw the number of real written bytes (Bytes Written). NULL if unused.
  * @return LV_FS_RES_OK or any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_write(lv_fs_drv_t * drv, void * file_p, const void * buf, uint32_t btw, uint32_t * bw)
-{
+static lv_fs_res_t fs_write(lv_fs_drv_t *drv, void *file_p, const void *buf, uint32_t btw, uint32_t *bw) {
     LV_UNUSED(drv);
     FRESULT res = f_write((FIL *)file_p, buf, btw, (UINT *)bw);
-    if(res == FR_OK) return LV_FS_RES_OK;
-    else return LV_FS_RES_UNKNOWN;
+    if (res == FR_OK)
+        return LV_FS_RES_OK;
+    else
+        return LV_FS_RES_UNKNOWN;
 }
 
 /**
@@ -190,21 +189,20 @@ static lv_fs_res_t fs_write(lv_fs_drv_t * drv, void * file_p, const void * buf, 
  * @return LV_FS_RES_OK: no error, the file is read
  *         any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_seek(lv_fs_drv_t * drv, void * file_p, uint32_t pos, lv_fs_whence_t whence)
-{
+static lv_fs_res_t fs_seek(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence) {
     LV_UNUSED(drv);
-    switch(whence) {
-        case LV_FS_SEEK_SET:
-            f_lseek((FIL *)file_p, pos);
-            break;
-        case LV_FS_SEEK_CUR:
-            f_lseek((FIL *)file_p, f_tell((FIL *)file_p) + pos);
-            break;
-        case LV_FS_SEEK_END:
-            f_lseek((FIL *)file_p, f_size((FIL *)file_p) + pos);
-            break;
-        default:
-            break;
+    switch (whence) {
+    case LV_FS_SEEK_SET:
+        f_lseek((FIL *)file_p, pos);
+        break;
+    case LV_FS_SEEK_CUR:
+        f_lseek((FIL *)file_p, f_tell((FIL *)file_p) + pos);
+        break;
+    case LV_FS_SEEK_END:
+        f_lseek((FIL *)file_p, f_size((FIL *)file_p) + pos);
+        break;
+    default:
+        break;
     }
     return LV_FS_RES_OK;
 }
@@ -217,8 +215,7 @@ static lv_fs_res_t fs_seek(lv_fs_drv_t * drv, void * file_p, uint32_t pos, lv_fs
  * @return LV_FS_RES_OK: no error, the file is read
  *         any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_tell(lv_fs_drv_t * drv, void * file_p, uint32_t * pos_p)
-{
+static lv_fs_res_t fs_tell(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p) {
     LV_UNUSED(drv);
     *pos_p = f_tell((FIL *)file_p);
     return LV_FS_RES_OK;
@@ -230,14 +227,14 @@ static lv_fs_res_t fs_tell(lv_fs_drv_t * drv, void * file_p, uint32_t * pos_p)
  * @param path path to a directory
  * @return pointer to an initialized 'DIR' variable
  */
-static void * fs_dir_open(lv_fs_drv_t * drv, const char * path)
-{
+static void *fs_dir_open(lv_fs_drv_t *drv, const char *path) {
     LV_UNUSED(drv);
-    FF_DIR * d = (FF_DIR *)lv_mem_alloc(sizeof(FF_DIR));
-    if(d == NULL) return NULL;
+    FF_DIR *d = (FF_DIR *)lv_mem_alloc(sizeof(FF_DIR));
+    if (d == NULL)
+        return NULL;
 
     FRESULT res = f_opendir(d, path);
-    if(res != FR_OK) {
+    if (res != FR_OK) {
         lv_mem_free(d);
         d = NULL;
     }
@@ -252,8 +249,7 @@ static void * fs_dir_open(lv_fs_drv_t * drv, const char * path)
  * @param fn pointer to a buffer to store the filename
  * @return LV_FS_RES_OK or any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * dir_p, char * fn)
-{
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *dir_p, char *fn) {
     LV_UNUSED(drv);
     FRESULT res;
     FILINFO fno;
@@ -261,15 +257,16 @@ static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * dir_p, char * fn)
 
     do {
         res = f_readdir((FF_DIR *)dir_p, &fno);
-        if(res != FR_OK) return LV_FS_RES_UNKNOWN;
+        if (res != FR_OK)
+            return LV_FS_RES_UNKNOWN;
 
-        if(fno.fattrib & AM_DIR) {
+        if (fno.fattrib & AM_DIR) {
             fn[0] = '/';
             strcpy(&fn[1], fno.fname);
-        }
-        else strcpy(fn, fno.fname);
+        } else
+            strcpy(fn, fno.fname);
 
-    } while(strcmp(fn, "/.") == 0 || strcmp(fn, "/..") == 0);
+    } while (strcmp(fn, "/.") == 0 || strcmp(fn, "/..") == 0);
 
     return LV_FS_RES_OK;
 }
@@ -280,8 +277,7 @@ static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * dir_p, char * fn)
  * @param dir_p pointer to an initialized 'DIR' variable
  * @return LV_FS_RES_OK or any error from lv_fs_res_t enum
  */
-static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * dir_p)
-{
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t *drv, void *dir_p) {
     LV_UNUSED(drv);
     f_closedir((FF_DIR *)dir_p);
     lv_mem_free(dir_p);
@@ -291,8 +287,7 @@ static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * dir_p)
 #else /*FS_FATFS == 0*/
 
 #if defined(FS_FATFS_LETTER) && FS_FATFS_LETTER != '\0'
-    #warning "FS_FATFS is not enabled but FS_FATFS_LETTER is set"
+#warning "FS_FATFS is not enabled but FS_FATFS_LETTER is set"
 #endif
 
 #endif /*LV_USE_FS_POSIX*/
-

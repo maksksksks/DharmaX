@@ -1,27 +1,31 @@
 #include "lvgl_ui.h"
 #include "tileview/system_tile.h"
 #include "rgb_tile.h"
-#include "tileview/wifi_tile.h"
 #include "home_tile.h"
-#include "tileview/ble_tile.h"
+#include "settings_tile.h"
+// #include "tileview/wifi_tile.h"
+// #include "tileview/ble_tile.h"
 
 void lvgl_ui_init(void) {
     lv_obj_t *tileview = lv_tileview_create(lv_scr_act());
     lv_obj_set_style_bg_opa(tileview, LV_OPA_0, LV_PART_SCROLLBAR | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(tileview, LV_OPA_0, LV_PART_SCROLLBAR | LV_STATE_SCROLLED);
 
-    lv_obj_t *rgb_tile = lv_tileview_add_tile(tileview, 0, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    lv_obj_t *rgb_tile = lv_tileview_add_tile(tileview, 0, 0, LV_DIR_HOR);
     rgb_tile_init(rgb_tile);
 
-    lv_obj_t *home_tile = lv_tileview_add_tile(tileview, 1, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    lv_obj_t *home_tile = lv_tileview_add_tile(tileview, 1, 0, LV_DIR_ALL);
     home_tile_init(home_tile);
 
-    lv_obj_t *system_tile = lv_tileview_add_tile(tileview, 2, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    lv_obj_t *system_tile = lv_tileview_add_tile(tileview, 2, 0, LV_DIR_HOR);
     system_tile_init(system_tile);
-    
-    lv_obj_t *wifi_tile = lv_tileview_add_tile(tileview, 3, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
-    wifi_tile_init(wifi_tile);
 
-    lv_obj_t *ble_tile = lv_tileview_add_tile(tileview, 4, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
-    ble_tile_init(ble_tile);
+    lv_obj_t *settings_tile = lv_tileview_add_tile(tileview, 1, 1, LV_DIR_VER);
+    settings_tile_init(settings_tile);
+    
+    // lv_obj_t *wifi_tile = lv_tileview_add_tile(tileview, 3, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    // wifi_tile_init(wifi_tile);
+
+    // lv_obj_t *ble_tile = lv_tileview_add_tile(tileview, 4, 0, LV_DIR_LEFT | LV_DIR_RIGHT);
+    // ble_tile_init(ble_tile);
 }

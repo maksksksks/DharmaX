@@ -3,18 +3,14 @@
 
 #include "lvgl.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void rgb_tile_init(lv_obj_t *parent);
 
-
 #ifdef __cplusplus
 }
 #endif
-
-
 
 #endif
