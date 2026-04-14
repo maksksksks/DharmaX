@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "app_events.c"
     INCLUDE_DIRS "."
-    REQUIRES esp_event
+    REQUIRES 
+        esp_event
 )

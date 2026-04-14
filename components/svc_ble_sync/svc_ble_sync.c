@@ -1,6 +1,6 @@
 #include "svc_ble_sync.h"
 #include "app_events.h"
-#include "esp_bt.h" // ★ НУЖЕН ДЛЯ КОНТРОЛЛЕРА!
+#include "esp_bt.h"
 #include "esp_log.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
@@ -9,6 +9,7 @@
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "sys/time.h"
+#include "svc_vibro.h"
 
 void ble_store_config_init(void);
 
@@ -36,11 +37,12 @@ static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct bl
         if (ctxt->om->om_len == 4) {
             uint32_t epoch_time;
             memcpy(&epoch_time, ctxt->om->om_data, 4);
-            ESP_LOGI(TAG, "Получено времени от телефона: %lu", epoch_time);
+            ESP_LOGI(TAG, "Получено время от телефона: %lu", epoch_time);
 
             struct timeval tv = {.tv_sec = epoch_time, .tv_usec = 0};
             settimeofday(&tv, NULL);
             esp_event_post(APP_EVENTS, EVT_BLE_TIME_SYNCED, NULL, 0, pdMS_TO_TICKS(100));
+            svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
             return 0;
         } else {
             ESP_LOGE(TAG, "Неверный размер пакета!");
@@ -71,9 +73,11 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONNECT:
         ESP_LOGI(TAG, "Телефон подключен!");
         ble_advertising = false;
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "Телефон отключен.");
+        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_LONG, LEVEL_MEDIUM, DURATION_DEFAULT);
         if (ble_running)
             ble_advertise();
         break;
@@ -136,16 +140,15 @@ static void ble_on_sync(void) {
         ble_advertise();
 }
 
-static void ble_host_task(void *param) 
-{
+static void ble_host_task(void *param) {
     ESP_LOGI(TAG, "BLE Host Task запущена");
-    
+
     // ★ Ждём полной синхронизации стека перед рекламой!
     // nimble_port_run() сначала вызывает sync_cb, потом входит в цикл событий
     nimble_port_run();
-    
+
     nimble_port_freertos_deinit();
-    
+
     ble_running = false;
     ble_advertising = false;
     ESP_LOGI(TAG, "BLE Host Task завершена");
@@ -154,8 +157,7 @@ static void ble_host_task(void *param)
 /**
  * @brief Инициализация с правильной последовательностью
  */
-static void ble_do_init(void)
-{
+static void ble_do_init(void) {
     int rc;
 
     // 1. NimBLE port init
@@ -194,10 +196,10 @@ static void ble_do_init(void)
 
     // 8. Запуск задачи (реклама начнётся автоматически в ble_on_sync → ble_advertise)
     nimble_port_freertos_init(ble_host_task);
-    
+
     ble_initialized = true;
-    ble_running = true;  // Помечаем сразу, чтобы settings_tile знал
-    
+    ble_running = true; // Помечаем сразу, чтобы settings_tile знал
+
     ESP_LOGI(TAG, "🚀 BLE инициализирован (реклама начнётся после sync)");
 }
 

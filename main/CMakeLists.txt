@@ -15,5 +15,7 @@ idf_component_register(
         svc_lighting_monitor
         svc_auto_brightness
         svc_screen_sleep
+        drv_vibro
+        svc_vibro
         #home_tile
 )

@@ -1,17 +1,20 @@
 #include "system_tile.h"
 
-#include "bsp_sdcard.h"
-#include "bsp_display.h"
 #include "bsp_battery.h"
+#include "bsp_display.h"
+#include "bsp_sdcard.h"
+
 // #include "bsp_phtrz.h"
 
-#include "esp_flash.h"
-#include "esp_psram.h"
 #include "driver/temperature_sensor.h"
+#include "esp_flash.h"
 #include "esp_private/esp_clk.h"
+#include "esp_psram.h"
 
-#include "onewire_bus.h"
+
 #include "ds18b20.h"
+#include "onewire_bus.h"
+
 
 static lv_obj_t *label_brightness;
 static lv_obj_t *label_chip_temp;
@@ -22,12 +25,11 @@ static lv_obj_t *label_photores;
 temperature_sensor_handle_t temp_sensor = NULL;
 static float ds18_last_temp = 0;
 
-#define DS18B20_GPIO    6
+#define DS18B20_GPIO 6
 onewire_bus_handle_t bus;
 ds18b20_device_handle_t ds18b20;
 
-static void ds18_task(void *arg)
-{
+static void ds18_task(void *arg) {
     float temp;
 
     while (1) {
@@ -81,11 +83,9 @@ static void system_time_cb(lv_timer_t *timer) {
 
 void ds18_init() {
     /* ---------- 1-Wire bus ---------- */
-    onewire_bus_config_t bus_config = {
-        .bus_gpio_num = DS18B20_GPIO
-    };
+    onewire_bus_config_t bus_config = {.bus_gpio_num = DS18B20_GPIO};
     onewire_bus_rmt_config_t rmt_config = {
-        .max_rx_bytes = 10,   // достаточно для DS18B20
+        .max_rx_bytes = 10, // достаточно для DS18B20
     };
     ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
 
@@ -94,7 +94,6 @@ void ds18_init() {
     ESP_ERROR_CHECK(ds18b20_new_device_from_bus(bus, &ds18b20_cfg, &ds18b20));
 }
 
-
 void system_tile_init(lv_obj_t *parent) {
     uint32_t flash_size;
     uint32_t psram_size;
@@ -102,14 +101,13 @@ void system_tile_init(lv_obj_t *parent) {
     uint32_t cpu_freq;
 
     ds18_init();
-    
+
     /*Create a list*/
     lv_obj_t *list = lv_list_create(parent);
-    lv_obj_t *lable =  lv_label_create(parent);
+    lv_obj_t *lable = lv_label_create(parent);
     lv_obj_set_style_text_font(lable, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_label_set_text(lable, "System");
     lv_obj_align(lable, LV_ALIGN_TOP_MID, 0, 3);
-
 
     lv_obj_set_size(list, lv_pct(100), lv_pct(75));
     // lv_obj_center(list);
@@ -124,11 +122,11 @@ void system_tile_init(lv_obj_t *parent) {
     // lv_obj_align(sw, LV_ALIGN_BOTTOM_MID, -75, -15);
 
     lv_obj_t *slider = lv_slider_create(parent);
-    lv_slider_set_range(slider, 1, 100);    
-    lv_slider_set_value(slider, 80, LV_ANIM_OFF); 
+    lv_slider_set_range(slider, 1, 100);
+    lv_slider_set_value(slider, 80, LV_ANIM_OFF);
 
-    lv_obj_set_size(slider, lv_pct(70), lv_pct(5));     
-    lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -18); 
+    lv_obj_set_size(slider, lv_pct(70), lv_pct(5));
+    lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -18);
     lv_obj_add_event_cb(slider, slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *list_item;
@@ -173,7 +171,7 @@ void system_tile_init(lv_obj_t *parent) {
     lv_obj_t *label_sd = lv_label_create(list_item);
     sdcard_size = bsp_sdcard_get_size();
     lv_label_set_text_fmt(label_sd, "%d MB", (int)(sdcard_size / 1024 / 1024));
-    
+
     list_item = lv_list_add_btn(list, NULL, "Battery");
     label_battery = lv_label_create(list_item);
     lv_label_set_text(label_battery, "--- V");
@@ -185,16 +183,8 @@ void system_tile_init(lv_obj_t *parent) {
     temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
     temperature_sensor_install(&temp_sensor_config, &temp_sensor);
     temperature_sensor_enable(temp_sensor);
-    
+
     lv_timer_create(system_time_cb, 1000, NULL);
 
-    xTaskCreatePinnedToCore(
-        ds18_task,
-        "ds18_task",
-        2048,
-        NULL,
-        5,
-        NULL,
-        1
-    );
+    xTaskCreatePinnedToCore(ds18_task, "ds18_task", 2048, NULL, 5, NULL, 1);
 }

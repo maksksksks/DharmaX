@@ -10,7 +10,6 @@ extern "C" {
 
 void ble_tile_init(lv_obj_t *parent);
 
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

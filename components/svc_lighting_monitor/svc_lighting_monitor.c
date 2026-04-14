@@ -39,13 +39,13 @@ static void lighting_task(void *pvParameters) {
 
 void svc_lighting_monitor_start(void) {
     // Создаем задачу на Ядре 0 (так как это фоновая логика, не UI)
-    xTaskCreatePinnedToCore(lighting_task, "light_mon", 2048, NULL, 2, &lighting_task_handle, 0);
+    xTaskCreatePinnedToCore(lighting_task, "light_mon", 4096, NULL, 2, &lighting_task_handle, 0);
 }
 
 void svc_lighting_monitor_stop(void) {
     if (lighting_task_handle != NULL) {
         vTaskDelete(lighting_task_handle);
         lighting_task_handle = NULL;
-        ESP_LOGI("SVC_LIG", "Lighting monitor stopped");
+        ESP_LOGI(TAG, "Lighting monitor stopped");
     }
 }

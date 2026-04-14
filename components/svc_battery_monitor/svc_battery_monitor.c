@@ -40,7 +40,7 @@ static void battery_task(void *pvParameters) {
 
 void svc_battery_monitor_start(void) {
     // Создаем задачу на Ядре 0 (так как это фоновая логика, не UI)
-    xTaskCreatePinnedToCore(battery_task, "bat_mon", 2048, NULL, 2, &battery_task_handle, 0);
+    xTaskCreatePinnedToCore(battery_task, "bat_mon", 4096, NULL, 2, &battery_task_handle, 0);
 }
 
 void svc_battery_monitor_stop(void) {

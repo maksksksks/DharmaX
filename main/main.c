@@ -34,6 +34,9 @@
 
 #include "svc_auto_brightness.h"
 
+//#include "drv_vibro.h"
+#include "svc_vibro.h"
+
 #include "svc_screen_sleep.h"
 #include "home_tile.h"
 
@@ -96,6 +99,7 @@ void app_main(void) {
     i2c_bus_handle = bsp_i2c_init();
     bsp_battery_init();
     bsp_phtrz_init();
+    
 
     // ==========================================
     // 3. Экран и Тач
@@ -125,6 +129,7 @@ void app_main(void) {
     // 7. Инициализация драйверов (без запуска задач!)
     // ==========================================
     drv_battery_init();
+    //drv_vibro_init();
 
     // ==========================================
     // 8. ★★ ЗАПУСК UI (здесь регистрируются обработчики событий!) ★★
@@ -144,6 +149,11 @@ void app_main(void) {
     svc_battery_monitor_start();  // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
     svc_lighting_monitor_start(); // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
     svc_auto_brightness_start();
+
+    svc_vibro_start();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    svc_vibro_send_event(VIBRATION_EVENT_OFF, LEVEL_ZERO, 0);
+    
     ESP_LOGI(TAG, "✅ Background tasks started (now event handlers are ready)");
 
     // ★ 10. ЗАПУСК АВТОСНА (после всего!) ★

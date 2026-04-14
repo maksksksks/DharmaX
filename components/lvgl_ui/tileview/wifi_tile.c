@@ -10,8 +10,7 @@ static lv_obj_t *list_btns[LIST_BTN_LEN_MAX];
 static uint16_t list_item_count = 0;
 static SemaphoreHandle_t wifi_scan_semaphore;
 
-static void update_ip_label(void)
-{
+static void update_ip_label(void) {
     char str[50];
     if (bsp_wifi_is_connected()) {
         char ip_str[32] = {0};
@@ -26,15 +25,12 @@ static void update_ip_label(void)
     }
 }
 
-static void wifi_timer_cb(lv_timer_t *timer)
-{
-    update_ip_label();
-}
+static void wifi_timer_cb(lv_timer_t *timer) { update_ip_label(); }
 
-static void btn_wifi_scan_event_handler(lv_event_t *e)
-{
+static void btn_wifi_scan_event_handler(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code != LV_EVENT_CLICKED) return;
+    if (code != LV_EVENT_CLICKED)
+        return;
 
     // Очищаем список
     if (lvgl_port_lock(0)) {
@@ -53,8 +49,7 @@ static void btn_wifi_scan_event_handler(lv_event_t *e)
     xSemaphoreGive(wifi_scan_semaphore);
 }
 
-static void lvgl_wifi_scan_task(void *arg)
-{
+static void lvgl_wifi_scan_task(void *arg) {
     wifi_ap_record_t ap_info[LIST_BTN_LEN_MAX];
     uint16_t ap_count = 0;
 
@@ -107,8 +102,7 @@ static void lvgl_wifi_scan_task(void *arg)
     }
 }
 
-void wifi_tile_init(lv_obj_t *parent)
-{
+void wifi_tile_init(lv_obj_t *parent) {
     // Инициализируем Wi-Fi подсистему (но не включаем!)
     // bsp_wifi_init(NULL, NULL);
 

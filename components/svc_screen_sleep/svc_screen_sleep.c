@@ -1,7 +1,6 @@
 #include "svc_screen_sleep.h"
 #include "bsp_display.h"
-#include "driver/gpio.h"    // ★ Для отключения микрофона
-#include "driver/i2s_std.h" // ★ Для I2S деинициализации
+#include "driver/gpio.h" // ★ Для отключения микрофона
 #include "esp_log.h"
 #include "esp_pm.h" // ★ CPU частота
 #include "freertos/FreeRTOS.h"

@@ -19,7 +19,8 @@ static lv_obj_t *list;
 //     char *rssi;
 // } wifi_info_t;
 
-// wifi_info_t wifi_infos[4] = {{.name = "wifi1", .rssi = "40db"}, {.name = "wifi2", .rssi = "76db"}, {.name = "wifi3", .rssi = "70db"}, {.name = "wifi4", .rssi = "70db"}};
+// wifi_info_t wifi_infos[4] = {{.name = "wifi1", .rssi = "40db"}, {.name = "wifi2", .rssi = "76db"}, {.name = "wifi3",
+// .rssi = "70db"}, {.name = "wifi4", .rssi = "70db"}};
 
 // static void btn_wifi_scan_event_handler(lv_event_t *e)
 // {
@@ -70,8 +71,7 @@ static lv_obj_t *list;
 //     }
 // }
 
-void ble_tile_init(lv_obj_t *parent)
-{
+void ble_tile_init(lv_obj_t *parent) {
     /*Create a list*/
     list = lv_list_create(parent);
 
