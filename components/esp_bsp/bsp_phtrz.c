@@ -49,11 +49,14 @@ void bsp_phtrz_get_voltage(int *voltage) {
     int adc_raw;
     int voltage_int = 0;
     
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_PHOTO, &adc_raw));
+    esp_err_t err = adc_oneshot_read(adc1_handle, ADC_CHANNEL_PHOTO, &adc_raw);
+    if (err != ESP_OK) {
+        *voltage = -1; // Флаг ошибки
+        return;
+    }
     
     if (do_calibration1_chan0) {
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &voltage_int));
-        // *voltage = (voltage_int / 1000.0f) * 3.0;  
+        adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &voltage_int);
     }
     *voltage = voltage_int;
 }

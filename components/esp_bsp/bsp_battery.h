@@ -17,5 +17,4 @@ void bsp_battery_get_voltage(float *voltage, uint16_t *adc_value);
 }
 #endif
 
-
 #endif

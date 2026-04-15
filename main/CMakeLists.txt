@@ -17,5 +17,6 @@ idf_component_register(
         svc_screen_sleep
         drv_vibro
         svc_vibro
+        svc_motion
         #home_tile
 )

@@ -5,4 +5,5 @@ idf_component_register(
         lvgl 
         log 
         app_core
+        svc_screen_sleep
 )

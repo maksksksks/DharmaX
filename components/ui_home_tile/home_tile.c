@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <time.h>
+#include "svc_screen_sleep.h"
 
 // ПОДКЛЮЧАЕМ ФОНОВУЮ КАРТИНКУ
 // Предполагается, что файл bg.c лежит в папке этого компонента и в нем объявлена переменная bg_home
@@ -22,6 +23,7 @@ lv_obj_t *ui_LabelTimeMM;
 lv_obj_t *ui_LabelTimeSS;
 lv_obj_t *ui_LabelBattery;
 lv_obj_t *ui_LabelLighting;
+lv_obj_t *ui_LabelSteps;
 
 int dateTime[7];
 
@@ -127,6 +129,19 @@ void on_screen_wake_update_time(void) {
     // Они обновятся и так через свои события, но для мгновенности - можно тут же
 }
 
+static void step_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    if (ui_LabelSteps != NULL && lv_obj_is_valid(ui_LabelSteps)) {
+        motion_step_data_t *data = (motion_step_data_t *)event_data;
+        char buf[5];
+        snprintf(buf, sizeof(buf), "%lu", data->steps);
+        lv_label_set_text(ui_LabelSteps, buf);    
+    }
+}
+
+static void wrist_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    svc_screen_sleep_wake_up();
+}
+
 // =========================================================
 // ТАЙМЕР ОТРИСОВКИ (Только время, без железа!)
 // =========================================================
@@ -143,8 +158,6 @@ void lv_timer_change_time_cb(lv_timer_t *timer) {
     lv_label_set_text(ui_LabelTimeMM, mm_buf);
     lv_label_set_text(ui_LabelTimeSS, ss_buf);
     lv_label_set_text(ui_LabelDate, day_buf);
-
-    // БАТАРЕЮ ТУТ БОЛЬШЕ НЕ ОБНОВЛЯЕМ! Этим занимается ui_battery_event_handler
 }
 
 // =========================================================
@@ -216,6 +229,15 @@ void home_tile_create_objects(void) {
     // Устанавливаем заглушку, реальное значение придет через 5 секунд от фоновой задачи
     lv_label_set_text(ui_LabelLighting, "---");
     lv_obj_set_style_text_color(ui_LabelLighting, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LabelSteps = lv_label_create(obj_home_tile);
+    lv_obj_set_width(ui_LabelSteps, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_LabelSteps, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_LabelSteps, -44);
+    lv_obj_set_y(ui_LabelSteps, 100);
+    lv_obj_set_align(ui_LabelSteps, LV_ALIGN_CENTER);
+    lv_obj_set_style_text_color(ui_LabelSteps, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelSteps, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 // =========================================================
@@ -240,4 +262,7 @@ void home_tile_init(lv_obj_t *parent) {
     esp_event_handler_instance_t lighting_handler;
     esp_event_handler_instance_register(APP_EVENTS, EVT_LIGHT_UPDATED, ui_lighting_event_handler, NULL,
                                         &lighting_handler);
+
+    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_STEP_UPDATED, step_event_handler, NULL, NULL);
+esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_event_handler, NULL, NULL);
 }

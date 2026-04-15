@@ -11,18 +11,17 @@ void drv_phtrz_init(void) {
     // Здесь можно оставить пусто.
 }
 
+// drv_phtrz.c
 bool drv_phtrz_get_data(int *value) {
     int data = 0;
-
-    // Вызываем без присвоения к esp_err_t, так как в bsp_battery.h она объявлена как void
     bsp_phtrz_get_voltage(&data);
 
-    if (data <= 0) {
-        ESP_LOGW(TAG, "Battery voltage is 0 (calibration failed?)");
+    // Если ADC отвалился по таймауту, data будет -1
+    if (data < 0) {
+        ESP_LOGW(TAG, "ADC read failed (timeout?)");
         return false;
     }
 
     *value = data;
-
     return true;
 }

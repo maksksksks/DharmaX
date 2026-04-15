@@ -37,6 +37,8 @@
 //#include "drv_vibro.h"
 #include "svc_vibro.h"
 
+#include "svc_motion.h"
+
 #include "svc_screen_sleep.h"
 #include "home_tile.h"
 
@@ -135,7 +137,7 @@ void app_main(void) {
     // 8. ★★ ЗАПУСК UI (здесь регистрируются обработчики событий!) ★★
     // ==========================================
     if (lvgl_port_lock(0)) {
-        lvgl_ui_init(); // ← Тут вызывается home_tile_init() → esp_event_handler_instance_register()
+        lvgl_ui_init();
         lvgl_port_unlock();
     }
 
@@ -146,14 +148,16 @@ void app_main(void) {
     // ==========================================
     // 9. ★★ ЗАПУСК ФОНОВЫХ ЗАДАЧ (только после UI!) ★★
     // ==========================================
-    svc_battery_monitor_start();  // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
-    svc_lighting_monitor_start(); // ← ПЕРЕНЕСЛИ ИЗ ШАГА 7 СЮДА
+    svc_battery_monitor_start();
+    svc_lighting_monitor_start();
     svc_auto_brightness_start();
 
     svc_vibro_start();
     vTaskDelay(pdMS_TO_TICKS(100));
     svc_vibro_send_event(VIBRATION_EVENT_OFF, LEVEL_ZERO, 0);
-    
+
+    svc_motion_monitor_start(i2c_bus_handle);
+
     ESP_LOGI(TAG, "✅ Background tasks started (now event handlers are ready)");
 
     // ★ 10. ЗАПУСК АВТОСНА (после всего!) ★

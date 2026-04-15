@@ -8,8 +8,8 @@
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
-#include "sys/time.h"
 #include "svc_vibro.h"
+#include "sys/time.h"
 
 void ble_store_config_init(void);
 
@@ -24,7 +24,7 @@ static uint8_t own_addr_type;
 // Состояние
 static bool ble_running = false;
 static bool ble_advertising = false;
-static bool ble_initialized = false; // ★ Был ли хоть раз инициализирован?
+static bool ble_initialized = false;
 
 static void ble_advertise(void);
 
@@ -73,11 +73,11 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONNECT:
         ESP_LOGI(TAG, "Телефон подключен!");
         ble_advertising = false;
-        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "Телефон отключен.");
-        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_LONG, LEVEL_MEDIUM, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
         if (ble_running)
             ble_advertise();
         break;
