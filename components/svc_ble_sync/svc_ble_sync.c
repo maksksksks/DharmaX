@@ -11,6 +11,7 @@
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "svc_vibro.h"
+#include "svc_screen_sleep.h"
 #include "sys/time.h"
 
 void ble_store_config_init(void);
@@ -109,6 +110,9 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         // Если стек просит нас показать PIN-код (DISP)
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
             svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            if (svc_screen_sleep_is_sleeping()) {
+                svc_screen_sleep_wake_up();
+            }
             struct ble_sm_io pkey = {0};
 
             // 1. Генерируем случайный 6-значный PIN (от 0 до 999999)
@@ -147,8 +151,8 @@ static void ble_advertise(void) {
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.tx_pwr_lvl_is_present = 1;
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
-    fields.name = (uint8_t *)"WristWatch";
-    fields.name_len = strlen("WristWatch");
+    fields.name = (uint8_t *)"DharmaX";
+    fields.name_len = strlen("DharmaX");
     fields.name_is_complete = 1;
 
     rc = ble_gap_adv_set_fields(&fields);
@@ -230,7 +234,7 @@ static void ble_do_init(void) {
     ble_hs_cfg.gatts_register_cb = gatt_svc_register_cb;
 
     // 4. Имя устройства
-    rc = ble_svc_gap_device_name_set("WristWatch");
+    rc = ble_svc_gap_device_name_set("DharmaX");
     assert(rc == 0);
 
     // 5. GAP сервис

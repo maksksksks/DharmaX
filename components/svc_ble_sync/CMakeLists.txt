@@ -10,4 +10,5 @@ idf_component_register(
         nvs_flash
         svc_vibro
         lvgl_ui
+        svc_screen_sleep
 )

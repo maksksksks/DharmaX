@@ -45,7 +45,7 @@
 #define EXAMPLE_LCD_H_RES (172)
 #define EXAMPLE_LCD_V_RES (320)
 
-static char *TAG = "WristWatch";
+static char *TAG = "DharmaX";
 
 /* LCD IO and panel */
 static esp_lcd_panel_io_handle_t io_handle = NULL;
