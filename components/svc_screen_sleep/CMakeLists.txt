@@ -8,4 +8,5 @@ idf_component_register(
         esp_bsp 
         app_core 
         svc_auto_brightness
+        lvgl_ui
 )

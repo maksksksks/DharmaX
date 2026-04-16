@@ -9,4 +9,5 @@ idf_component_register(
         app_core 
         nvs_flash
         svc_vibro
+        lvgl_ui
 )

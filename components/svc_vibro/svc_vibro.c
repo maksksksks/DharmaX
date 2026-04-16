@@ -291,7 +291,7 @@ bool svc_vibro_send_event(vibro_event_t event, vibro_level_t level, vibro_durati
     vibro_data_t msg = {.event = event, .level = level, .duration = duration};
 
     // ✅ Логирование (оставляем для отладки)
-    ESP_LOGW(TAG, "[SEND] evt=%d lvl=%d dur=%d | caller: 0x%p", event, level, duration, __builtin_return_address(0));
+    //ESP_LOGW(TAG, "[SEND] evt=%d lvl=%d dur=%d | caller: 0x%p", event, level, duration, __builtin_return_address(0));
 
     BaseType_t ret = xQueueSend(s_event_queue, &msg, pdMS_TO_TICKS(10));
 

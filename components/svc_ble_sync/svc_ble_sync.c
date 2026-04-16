@@ -2,14 +2,16 @@
 #include "app_events.h"
 #include "esp_bt.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
+#include "lvgl_ui.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
-#include "sys/time.h"
 #include "svc_vibro.h"
+#include "sys/time.h"
 
 void ble_store_config_init(void);
 
@@ -24,7 +26,7 @@ static uint8_t own_addr_type;
 // Состояние
 static bool ble_running = false;
 static bool ble_advertising = false;
-static bool ble_initialized = false; // ★ Был ли хоть раз инициализирован?
+static bool ble_initialized = false;
 
 static void ble_advertise(void);
 
@@ -60,7 +62,8 @@ static const struct ble_gatt_svc_def gatt_services[] = {
                                                            .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_TIME_SYNC),
                                                            .access_cb = time_chr_access,
                                                            .val_handle = &time_sync_conn_handle,
-                                                           .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+                                                           // Требуем аутентификации (MITM) для записи!
+                                                           .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
                                                        },
                                                        {0}},
     },
@@ -68,19 +71,67 @@ static const struct ble_gatt_svc_def gatt_services[] = {
 
 static void gatt_svc_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {}
 
+// Предположим, у тебя есть функции для работы с экраном, например:
+// void display_show_ble_pin(const char* pin);
+// void display_clear_ble_pin();
+
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
-        ESP_LOGI(TAG, "Телефон подключен!");
+        ESP_LOGI(TAG, "Телефон подключен! Ожидаем сопряжения...");
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         ble_advertising = false;
-        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "Телефон отключен.");
-        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_LONG, LEVEL_MEDIUM, DURATION_DEFAULT);
+        // Стираем PIN с экрана, если он там остался
+        close_pairing_popup_cb(NULL);
+        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
         if (ble_running)
             ble_advertise();
         break;
+
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        // Шифрование установлено! Сопряжение прошло успешно.
+        if (event->enc_change.status == 0) {
+            ESP_LOGI(TAG, "Шифрование установлено! Авторизовано.");
+            // PIN больше не нужен, очищаем экран
+            close_pairing_popup_cb(NULL);
+            svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+        } else {
+            ESP_LOGE(TAG, "Ошибка шифрования: %d", event->enc_change.status);
+            // display_clear_ble_pin();
+        }
+        break;
+
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+        ESP_LOGI(TAG, "PASSKEY_ACTION event");
+        // Если стек просит нас показать PIN-код (DISP)
+        if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+            svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            struct ble_sm_io pkey = {0};
+
+            // 1. Генерируем случайный 6-значный PIN (от 0 до 999999)
+            uint32_t passkey_val = esp_random() % 1000000;
+
+            // 2. Форматируем с ведущими нулями (например, 004231) для дисплея
+            char pin_str[7];
+            snprintf(pin_str, sizeof(pin_str), "%06lu", (unsigned long)passkey_val);
+            ESP_LOGI(TAG, ">>> ВВЕДИТЕ PIN НА ТЕЛЕФОНЕ: %s <<<", pin_str);
+
+            // 3. Выводим PIN на экран часов (раскомментируй/адаптируй под свой дисплей)
+            show_pairing_popup(pin_str);
+
+            // 4. Передаем сгенерированный PIN обратно в стек NimBLE!
+            pkey.action = BLE_SM_IOACT_DISP;
+            pkey.passkey = passkey_val;
+            int rc = ble_sm_inject_io(event->passkey.conn_handle, &pkey);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "ble_sm_inject_io failed: %d", rc);
+            }
+        }
+        break;
+
     default:
         break;
     }
@@ -168,11 +219,11 @@ static void ble_do_init(void) {
     }
     ESP_LOGI(TAG, "   [1/7] nimble_port_init OK");
 
-    // 2. Безопасность
-    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
-    ble_hs_cfg.sm_bonding = 0;
-    ble_hs_cfg.sm_mitm = 0;
-    ble_hs_cfg.sm_sc = 0;
+    // 2. Безопасность (Включаем сопряжение с PIN-кодом)
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_DISP_ONLY; // У нас есть экран!
+    ble_hs_cfg.sm_bonding = 1;                      // Запоминаем устройства
+    ble_hs_cfg.sm_mitm = 1;                         // ВКЛЮЧАЕМ: требует MITM защиту (вызовет PIN)
+    ble_hs_cfg.sm_sc = 1;                           // LE Secure Connections
 
     // 3. Callbacks
     ble_hs_cfg.sync_cb = ble_on_sync;

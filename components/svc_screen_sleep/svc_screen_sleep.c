@@ -7,6 +7,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "lvgl_ui.h"
 #include "svc_auto_brightness.h"
 
 static const char *TAG = "SCR_SLEEP";
@@ -259,7 +260,7 @@ static void screen_sleep_task(void *pvParameters) {
                 xSemaphoreGive(state_mutex);
             }
 
-            if (should_sleep) {
+            if (should_sleep && !get_popup_status()) {
                 screen_turn_off();
             }
         }
