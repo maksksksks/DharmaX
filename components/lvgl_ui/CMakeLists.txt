@@ -15,4 +15,5 @@ idf_component_register(SRCS ${SRC_FILES}
                         "ui_rgb_tile" 
                         "ui_home_tile"
                         "ui_settings_tile"
+                        "ui_notifications_tile"
                         )

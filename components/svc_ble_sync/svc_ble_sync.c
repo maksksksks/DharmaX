@@ -10,8 +10,8 @@
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
-#include "svc_vibro.h"
 #include "svc_screen_sleep.h"
+#include "svc_vibro.h"
 #include "sys/time.h"
 
 void ble_store_config_init(void);
@@ -20,7 +20,11 @@ static const char *TAG = "SVC_BLE";
 
 #define BLE_SVC_UUID_TIME_SYNC 0x1234
 #define BLE_CHR_UUID_TIME_SYNC 0x5678
+#define BLE_CHR_UUID_NOTIFY    0x5679 // Телефон пишет текст сюда
+#define BLE_CHR_UUID_ACTION    0x5680 // Часы шлют кнопки отсюда
 
+static uint16_t action_chr_val_handle = 0; // Хэндл характеристики
+static uint16_t active_conn_handle = 0;    // Хэндл подключения
 static uint16_t time_sync_conn_handle;
 static uint8_t own_addr_type;
 
@@ -32,7 +36,7 @@ static bool ble_initialized = false;
 static void ble_advertise(void);
 
 // ==========================================
-// GATT CALLBACK (без изменений)
+// GATT CALLBACK
 // ==========================================
 
 static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
@@ -55,26 +59,112 @@ static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct bl
     return BLE_ATT_ERR_UNLIKELY;
 }
 
+// Функция для разделения строки "Telegram: Текст"
+static notify_data parse_notify_string(const char* raw) {
+    notify_data out;
+    memset(&out, 0, sizeof(out));
+    
+    // Ищем ": " в строке
+    char *separator = strstr(raw, ": ");
+    
+    if (separator != NULL) {
+        // Копируем приложение (до двоеточия)
+        int app_len = separator - raw;
+        if (app_len >= 50) app_len = 49;
+        strncpy(out.app, raw, app_len);
+        
+        // Копируем данные (после двоеточия и пробела)
+        strncpy(out.data, separator + 2, 256);
+    } else {
+        // Если формат неправильный, кидаем всё в данные
+        strncpy(out.data, raw, 256);
+    }
+    
+    out.time_life = 600; // 10 минут (для справки)
+    return out;
+}
+
+static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_LONG);
+        
+        uint16_t len = ctxt->om->om_len;
+        if (len > 256) len = 256; 
+        
+        char buf[257]; 
+        memcpy(buf, ctxt->om->om_data, len);
+        buf[len] = '\0'; 
+
+        ESP_LOGI(TAG, "Получено уведомление (%d байт): %s", len, buf);
+        
+        // ★ Парсим строку в структуру
+        notify_data n_data = parse_notify_string(buf);
+        
+        // ★ Отправляем событие в главный поток LVGL!
+        // Используем esp_event_post, так как он копирует данные (n_data) в очередь,
+        // и нам не страшно, что локальная переменная удалится после выхода из коллбэка.
+        esp_event_post(APP_EVENTS, EVT_BLE_NOTIFY_RX, &n_data, sizeof(n_data), pdMS_TO_TICKS(100));
+        
+        return 0;
+    }
+    ESP_LOGW(TAG, "Попытка чтения характеристики уведомления");
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
+static int action_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    // Эта характеристика теперь только NOTIFY (Часы -> Телефон).
+    // Телефон не может в нее писать! 
+    // Сюда будут приходить только запросы на подписку (чтение/запись дескриптора 0x2902),
+    // но NimBLE обрабатывает 0x2902 автоматически под капотом.
+    
+    ESP_LOGW(TAG, "Попытка доступа к характеристике действия (только NOTIFY)");
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
 static const struct ble_gatt_svc_def gatt_services[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
         .uuid = BLE_UUID16_DECLARE(BLE_SVC_UUID_TIME_SYNC),
-        .characteristics = (struct ble_gatt_chr_def[]){{
-                                                           .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_TIME_SYNC),
-                                                           .access_cb = time_chr_access,
-                                                           .val_handle = &time_sync_conn_handle,
-                                                           // Требуем аутентификации (MITM) для записи!
-                                                           .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
-                                                       },
-                                                       {0}},
+        .characteristics = (struct ble_gatt_chr_def[]){
+            {
+                .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_TIME_SYNC),
+                .access_cb = time_chr_access,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
+            },
+            {
+                // Телефон отправляет текст на часы
+                .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_NOTIFY),
+                .access_cb = notify_chr_access,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
+            },
+            {
+                // Часы отправляют кнопки на телефон
+                .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_ACTION),
+                .access_cb = action_chr_access,
+                .val_handle = &action_chr_val_handle,
+                .flags = BLE_GATT_CHR_F_NOTIFY, // ★ ТОЛЬКО NOTIFY!
+            },
+            {0}
+        },
     },
-    {0}};
+    {0}
+};
 
 static void gatt_svc_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {}
 
-// Предположим, у тебя есть функции для работы с экраном, например:
-// void display_show_ble_pin(const char* pin);
-// void display_clear_ble_pin();
+// Вызывай эту функцию при нажатии кнопки на часах
+void send_action_to_phone(uint8_t action_code) {
+    if (active_conn_handle == 0 || action_chr_val_handle == 0) {
+        ESP_LOGW(TAG, "Нет подключения или хэндла");
+        return;
+    }
+
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(&action_code, 1);
+    if (om == NULL) return;
+
+    ble_gatts_notify_custom(active_conn_handle, action_chr_val_handle, om);
+    ESP_LOGI(TAG, "Действие 0x%02X отправлено на телефон", action_code);
+}
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     switch (event->type) {
@@ -82,6 +172,12 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         ESP_LOGI(TAG, "Телефон подключен! Ожидаем сопряжения...");
         svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         ble_advertising = false;
+        active_conn_handle = event->connect.conn_handle;
+
+        int rc = ble_gap_security_initiate(event->connect.conn_handle);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "Ошибка инициализации безопасности: %d", rc);
+        }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "Телефон отключен.");
@@ -255,7 +351,9 @@ static void ble_do_init(void) {
     ble_initialized = true;
     ble_running = true; // Помечаем сразу, чтобы settings_tile знал
 
-    ESP_LOGI(TAG, "🚀 BLE инициализирован (реклама начнётся после sync)");
+    ble_advertise();
+
+    ESP_LOGI(TAG, "🚀 BLE инициализирован");
 }
 
 // ==========================================

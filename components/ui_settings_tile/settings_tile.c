@@ -37,10 +37,12 @@ static void sw_auto_brightness_cb(lv_event_t *e) {
         svc_auto_brightness_set_enabled(true);
         svc_auto_brightness_resume(true);
         lv_label_set_text(lbl_status_auto_brightness, "#00FF00 ON#");
+        send_action_to_phone(0x02);
         ESP_LOGI(TAG, "Auto-Brightness: ON");
     } else {
         svc_auto_brightness_set_enabled(false);
         lv_label_set_text(lbl_status_auto_brightness, "#FF0000 OFF#");
+        send_action_to_phone(0x01);
         ESP_LOGI(TAG, "Auto-Brightness: OFF");
     }
 }

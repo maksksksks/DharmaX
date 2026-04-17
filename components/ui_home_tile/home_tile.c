@@ -26,7 +26,7 @@ lv_obj_t *ui_LabelLighting;
 int dateTime[7];
 
 // =========================================================
-// ОБРАБОТЧИК СОБЫТИЙ БАТАРЕИ (Заменил getBatteryString)
+// ОБРАБОТЧИК СОБЫТИЙ БАТАРЕИ
 // =========================================================
 static void ui_battery_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
     if (id == EVT_BATTERY_UPDATED) {

@@ -5,10 +5,12 @@
 ESP_EVENT_DECLARE_BASE(APP_EVENTS);
 
 typedef enum {
+    EVT_NEW_NOTIFY,
     EVT_BATTERY_UPDATED,
     EVT_BLE_TIME_SYNCED,
     EVT_LIGHT_UPDATED,
-    EVT_VIBRO_STATE_CHANGED
+    EVT_VIBRO_STATE_CHANGED,
+    EVT_BLE_NOTIFY_RX
     // EVT_STEPS_UPDATED
 } app_event_id_t;
 
@@ -62,3 +64,10 @@ typedef struct {
     vibro_level_t level;
     vibro_duration_t duration;
 } vibro_data_t;
+
+
+typedef struct {
+    char app[50];
+    char data[257];
+    uint32_t time_life; 
+} notify_data;
