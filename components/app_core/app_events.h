@@ -8,7 +8,8 @@ typedef enum {
     EVT_BATTERY_UPDATED,
     EVT_BLE_TIME_SYNCED,
     EVT_LIGHT_UPDATED,
-    EVT_VIBRO_STATE_CHANGED
+    EVT_VIBRO_STATE_CHANGED,
+    EVT_TEMP_UPDATED
     // EVT_STEPS_UPDATED
 } app_event_id_t;
 
@@ -21,6 +22,10 @@ typedef struct {
 typedef struct {
     int value;
 } lighting_data_t;
+
+typedef struct {
+    float temp;
+} temperature_data_t;
 
 typedef enum {
     VIBRATION_EVENT_NONE = 0,

@@ -1,14 +1,13 @@
 #include "drv_ds18b20.h"
-
-#include "driver/temperature_sensor.h"
+//#include "driver/temperature_sensor.h"
 #include "ds18b20.h"
 #include "onewire_bus.h"
+#include <stdbool.h>
 
 #define DS18B20_GPIO 6
 onewire_bus_handle_t bus;
 ds18b20_device_handle_t ds18b20;
-temperature_sensor_handle_t temp_sensor = NULL;
-static float ds18_last_temp = 0;
+//static float ds18_last_temp = 0;
 
 void drv_ds18b20_init() {
     /* ---------- 1-Wire bus ---------- */
@@ -21,14 +20,18 @@ void drv_ds18b20_init() {
     /* ---------- DS18B20 ---------- */
     ds18b20_config_t ds18b20_cfg = {};
     ESP_ERROR_CHECK(ds18b20_new_device_from_bus(bus, &ds18b20_cfg, &ds18b20));
+    ds18b20_set_resolution(ds18b20, DS18B20_RESOLUTION_10B);
 }
 
-static void drv_ds18b20_get_data(float *temp) {
-    float cur_temp;
+void drv_ds18b20_start_conversion() {
     ds18b20_trigger_temperature_conversion(ds18b20);
-    vTaskDelay(pdMS_TO_TICKS(800));
+}
 
+bool drv_ds18b20_read_temp(float *temp) {
+    float cur_temp;
     if (ds18b20_get_temperature(ds18b20, &cur_temp) == ESP_OK) {
         *temp = cur_temp;
+        return true;
     }
+    return false;
 }
