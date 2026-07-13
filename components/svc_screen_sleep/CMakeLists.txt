@@ -6,4 +6,5 @@ idf_component_register(
         log
         bsp_display
         svc_auto_brightness
+        screen_aod
 )

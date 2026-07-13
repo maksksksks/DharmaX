@@ -3,6 +3,7 @@
 #include "svc_auto_brightness.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "screen_aod_logic.h"
 
 static const char *TAG = "SVC_SLEEP";
 
@@ -36,6 +37,8 @@ void svc_screen_sleep_wake_up(void)
     s_idle_seconds = 0;
     if (!s_sleeping) return;
 
+    screen_aod_exit();
+
     s_sleeping = false;
     if (svc_auto_brightness_is_enabled()) {
         svc_auto_brightness_resume(true);
@@ -49,9 +52,12 @@ void svc_screen_sleep_force_sleep(void)
 {
     if (!s_enabled || s_sleeping) return;
 
+    screen_aod_enter();
+    
+    bsp_display_set_brightness(20); 
+
     s_sleeping = true;
     svc_auto_brightness_suspend();
-    bsp_display_set_brightness(0);
     ESP_LOGI(TAG, "Screen put to sleep");
 }
 

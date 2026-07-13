@@ -916,6 +916,13 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/CMakeFiles/install.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/CMakeFiles/install/local.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/CMakeFiles/install/strip.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/__idf_screen_aod.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/edit_cache.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/rebuild_cache.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/list_install_components.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install/local.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install/strip.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/CMakeFiles/__idf_svc_screen_sleep.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/CMakeFiles/edit_cache.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/CMakeFiles/rebuild_cache.dir
@@ -1084,13 +1091,6 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_ir/CMakeFiles/install.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_ir/CMakeFiles/install/local.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_ir/CMakeFiles/install/strip.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/__idf_screen_aod.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/edit_cache.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/rebuild_cache.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/list_install_components.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install/local.dir
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/CMakeFiles/install/strip.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui/CMakeFiles/__idf_ui.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui/CMakeFiles/edit_cache.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui/CMakeFiles/rebuild_cache.dir

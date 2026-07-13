@@ -86,6 +86,23 @@ static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uin
     // смазывания/артефактов именно в обновляемых областях.
 }
 
+// ★ КРИТИЧНО для SH8601: контроллер требует, чтобы область частичного
+// обновления была выровнена по чётным границам (данные шлются блоками по 2
+// пикселя из-за QSPI/внутренней адресации). Без этого LVGL9 присылает в
+// flush_cb произвольные (нечётные) прямоугольники при точечных обновлениях
+// (лейблы часов, шагомера и т.д.) - именно это и вызывает смазывание/
+// артефакты, которых нет в demo-примере производителя (там rounder был,
+// просто через LVGL8-style API).
+static void example_lvgl_rounder_cb(lv_event_t *e)
+{
+    lv_area_t *area = lv_event_get_param(e);
+
+    area->x1 = (area->x1 >> 1) << 1;
+    area->y1 = (area->y1 >> 1) << 1;
+    area->x2 = ((area->x2 >> 1) << 1) + 1;
+    area->y2 = ((area->y2 >> 1) << 1) + 1;
+}
+
 // ★ Реальное завершение QSPI-передачи (вызывается из ISR SPI-драйвера)
 static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io,
                                             esp_lcd_panel_io_event_data_t *edata,
@@ -263,6 +280,7 @@ void app_main(void)
     lv_display_t *disp = lv_display_create(EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
     s_disp = disp; // ★ нужен example_notify_lvgl_flush_ready()
     lv_display_set_flush_cb(disp, example_lvgl_flush_cb);
+    lv_display_add_event_cb(disp, example_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);   // ← добавить эту строку
     lv_display_set_buffers(disp, buf1, buf2, buf_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_user_data(disp, panel_handle);
 

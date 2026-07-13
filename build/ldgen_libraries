@@ -173,13 +173,13 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/libdrv_phtrz.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/app_core/libapp_core.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/bsp_display/libbsp_display.a
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/libsvc_screen_sleep.a
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/libsvc_auto_brightness.a
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_home/libscreen_home.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/libscreen_aod.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui_resources/libui_resources.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui/libui.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_home/libscreen_home.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/libsvc_screen_sleep.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/libsvc_auto_brightness.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/libscreen_aod.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_notify/libscreen_notify.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui_widgets/libui_widgets.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_phone/libscreen_phone.a
@@ -202,7 +202,8 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_sys/libscreen_sys.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_ir/libscreen_ir.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_ir_transmit/libsvc_ir_transmit.a
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/libscreen_aod.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_screen_sleep/libsvc_screen_sleep.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_home/libscreen_home.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui_widgets/libui_widgets.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_notify/libscreen_notify.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_phone/libscreen_phone.a
@@ -225,7 +226,6 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_sys/libscreen_sys.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_ir_transmit/libsvc_ir_transmit.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_ir/libscreen_ir.a
-/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/screen_aod/libscreen_aod.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/ui/libui.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/espressif__esp_lcd_sh8601/libespressif__esp_lcd_sh8601.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/i2c_bsp/libi2c_bsp.a

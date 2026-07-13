@@ -173,13 +173,13 @@ $<TARGET_FILE:idf::svc_auto_brightness>
 $<TARGET_FILE:__idf_drv_phtrz>
 $<TARGET_FILE:__idf_app_core>
 $<TARGET_FILE:__idf_bsp_display>
-$<TARGET_FILE:idf::svc_screen_sleep>
-$<TARGET_FILE:__idf_svc_auto_brightness>
-$<TARGET_FILE:idf::screen_home>
+$<TARGET_FILE:idf::screen_aod>
 $<TARGET_FILE:__idf_ui_resources>
 $<TARGET_FILE:__idf_ui>
 $<TARGET_FILE:__idf_screen_home>
 $<TARGET_FILE:__idf_svc_screen_sleep>
+$<TARGET_FILE:__idf_svc_auto_brightness>
+$<TARGET_FILE:__idf_screen_aod>
 $<TARGET_FILE:__idf_screen_notify>
 $<TARGET_FILE:__idf_ui_widgets>
 $<TARGET_FILE:__idf_screen_phone>
@@ -202,7 +202,8 @@ $<TARGET_FILE:__idf_screen_events>
 $<TARGET_FILE:__idf_screen_sys>
 $<TARGET_FILE:__idf_screen_ir>
 $<TARGET_FILE:__idf_svc_ir_transmit>
-$<TARGET_FILE:__idf_screen_aod>
+$<TARGET_FILE:idf::svc_screen_sleep>
+$<TARGET_FILE:idf::screen_home>
 $<TARGET_FILE:idf::ui_widgets>
 $<TARGET_FILE:idf::screen_notify>
 $<TARGET_FILE:idf::screen_phone>
@@ -225,7 +226,6 @@ $<TARGET_FILE:idf::screen_events>
 $<TARGET_FILE:idf::screen_sys>
 $<TARGET_FILE:idf::svc_ir_transmit>
 $<TARGET_FILE:idf::screen_ir>
-$<TARGET_FILE:idf::screen_aod>
 $<TARGET_FILE:idf::ui>
 $<TARGET_FILE:idf::espressif__esp_lcd_sh8601>
 $<TARGET_FILE:idf::i2c_bsp>

@@ -343,18 +343,18 @@ idf_component_register(
 lv_obj_t * ui_ScreenSys = NULL;
 lv_obj_t * ui_Label17 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenSys(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenPhone_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenIR, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenIR_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenPhone_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenIR, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenIR_full_init);
+}
 }
 
 // build funtions
@@ -426,6 +426,7 @@ extern "C" {
 // SCREEN: ui_ScreenSys
 extern void ui_ScreenSys_screen_init(void);
 extern void ui_ScreenSys_screen_destroy(void);
+extern void ui_ScreenSys_full_init(void);
 extern void ui_event_ScreenSys(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSys;
 extern lv_obj_t * ui_Label17;
@@ -563,18 +564,18 @@ idf_component_register(
 lv_obj_t * ui_ScreenSD = NULL;
 lv_obj_t * ui_Label13 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenSD(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSettings_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSystem_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSettings_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSystem_full_init);
+}
 }
 
 // build funtions
@@ -646,6 +647,7 @@ extern "C" {
 // SCREEN: ui_ScreenSD
 extern void ui_ScreenSD_screen_init(void);
 extern void ui_ScreenSD_screen_destroy(void);
+extern void ui_ScreenSD_full_init(void);
 extern void ui_event_ScreenSD(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSD;
 extern lv_obj_t * ui_Label13;
@@ -1092,6 +1094,7 @@ extern "C" {
 // SCREEN: ui_ScreenCalendar
 extern void ui_ScreenCalendar_screen_init(void);
 extern void ui_ScreenCalendar_screen_destroy(void);
+extern void ui_ScreenCalendar_full_init(void);
 extern void ui_event_ScreenCalendar(lv_event_t * e);
 extern lv_obj_t * ui_ScreenCalendar;
 extern lv_obj_t * ui_Calendar;
@@ -1118,22 +1121,22 @@ lv_obj_t * ui_ScreenCalendar = NULL;
 lv_obj_t * ui_Calendar = NULL;
 lv_obj_t * ui_Label4 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenCalendar(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenHome_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalc_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenEvents, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenEvents_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenHome_screen_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalc_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenEvents, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenEvents_full_init);
+}
 }
 
 // build funtions
@@ -2029,6 +2032,7 @@ extern "C" {
 // SCREEN: ui_ScreenWeatherDetails
 extern void ui_ScreenWeatherDetails_screen_init(void);
 extern void ui_ScreenWeatherDetails_screen_destroy(void);
+extern void ui_ScreenWeatherDetails_full_init(void);
 extern void ui_event_ScreenWeatherDetails(lv_event_t * e);
 extern lv_obj_t * ui_ScreenWeatherDetails;
 extern lv_obj_t * ui_Label12;
@@ -2072,14 +2076,14 @@ void ui_ScreenWeatherDetails_full_init(void)
 lv_obj_t * ui_ScreenWeatherDetails = NULL;
 lv_obj_t * ui_Label12 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenWeatherDetails(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenWeather_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenWeather_full_init);
+}
 }
 
 // build funtions
@@ -4784,6 +4788,7 @@ extern "C" {
 // SCREEN: ui_ScreenNews
 extern void ui_ScreenNews_screen_init(void);
 extern void ui_ScreenNews_screen_destroy(void);
+extern void ui_ScreenNews_full_init(void);
 extern void ui_event_ScreenNews(lv_event_t * e);
 extern lv_obj_t * ui_ScreenNews;
 extern lv_obj_t * ui_Label16;
@@ -4808,14 +4813,14 @@ extern lv_obj_t * ui_Label16;
 lv_obj_t * ui_ScreenNews = NULL;
 lv_obj_t * ui_Label16 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenNews(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeather_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeather_full_init);
+}
 }
 
 // build funtions
@@ -5185,6 +5190,7 @@ extern "C" {
 // SCREEN: ui_ScreenHome
 extern void ui_ScreenHome_screen_init(void);
 extern void ui_ScreenHome_screen_destroy(void);
+extern void ui_ScreenHome_full_init(void);
 extern void ui_event_ScreenHome(lv_event_t * e);
 extern lv_obj_t * ui_ScreenHome;
 extern lv_obj_t * ui_Label1;
@@ -5397,14 +5403,14 @@ idf_component_register(
 lv_obj_t * ui_ScreenEvents = NULL;
 lv_obj_t * ui_Label18 = NULL;
 // event funtions
+// event funtions
 void ui_event_Label18(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenCalendar_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenCalendar_full_init);
+}
 }
 
 // build funtions
@@ -5476,6 +5482,7 @@ extern "C" {
 // SCREEN: ui_ScreenEvents
 extern void ui_ScreenEvents_screen_init(void);
 extern void ui_ScreenEvents_screen_destroy(void);
+extern void ui_ScreenEvents_full_init(void);
 extern lv_obj_t * ui_ScreenEvents;
 extern void ui_event_Label18(lv_event_t * e);
 extern lv_obj_t * ui_Label18;
@@ -6194,6 +6201,7 @@ extern "C" {
 // SCREEN: ui_ScreenAOD
 extern void ui_ScreenAOD_screen_init(void);
 extern void ui_ScreenAOD_screen_destroy(void);
+extern void ui_ScreenAOD_full_init(void);
 extern void ui_event_ScreenAOD(lv_event_t * e);
 extern lv_obj_t * ui_ScreenAOD;
 
@@ -6956,22 +6964,22 @@ void ui_ScreenPhone_full_init(void)
 lv_obj_t * ui_ScreenPhone = NULL;
 lv_obj_t * ui_Label9 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenPhone(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenTimeUtils_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenHome_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenSys_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenTimeUtils_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenHome_screen_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenSys_full_init);
+}
 }
 
 // build funtions
@@ -7041,6 +7049,7 @@ extern "C" {
 // SCREEN: ui_ScreenPhone
 extern void ui_ScreenPhone_screen_init(void);
 extern void ui_ScreenPhone_screen_destroy(void);
+extern void ui_ScreenPhone_full_init(void);
 extern void ui_event_ScreenPhone(lv_event_t * e);
 extern lv_obj_t * ui_ScreenPhone;
 extern lv_obj_t * ui_Label9;
@@ -7954,26 +7963,26 @@ idf_component_register(
 lv_obj_t * ui_ScreenSettings = NULL;
 lv_obj_t * ui_Label14 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenSettings(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSystem_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSD_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenNotify, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenNotify_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenWeather_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSystem_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSD_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenNotify, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenNotify_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenWeather_full_init);
+}
 }
 
 // build funtions
@@ -8027,6 +8036,7 @@ extern "C" {
 // SCREEN: ui_ScreenSettings
 extern void ui_ScreenSettings_screen_init(void);
 extern void ui_ScreenSettings_screen_destroy(void);
+extern void ui_ScreenSettings_full_init(void);
 extern void ui_event_ScreenSettings(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSettings;
 extern lv_obj_t * ui_Label14;
@@ -8405,6 +8415,7 @@ extern "C" {
 // SCREEN: ui_ScreenNotify
 extern void ui_ScreenNotify_screen_init(void);
 extern void ui_ScreenNotify_screen_destroy(void);
+extern void ui_ScreenNotify_full_init(void);
 extern void ui_event_ScreenNotify(lv_event_t * e);
 extern lv_obj_t * ui_ScreenNotify;
 extern lv_obj_t * ui_Label8;
@@ -8449,18 +8460,18 @@ lv_obj_t * ui_ScreenNotify = NULL;
 lv_obj_t * ui_Label8 = NULL;
 lv_obj_t * ui_TabView1 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenNotify(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenHome_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSD_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenHome_screen_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSD_full_init);
+}
 }
 
 // build funtions
@@ -8534,26 +8545,26 @@ idf_component_register(
 lv_obj_t * ui_ScreenWeather = NULL;
 lv_obj_t * ui_Label11 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenWeather(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenWeatherDetails, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeatherDetails_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSettings_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenHome_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenNews, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenNews_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenWeatherDetails, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeatherDetails_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSettings_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenHome_screen_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenNews, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenNews_full_init);
+}
 }
 
 // build funtions
@@ -8626,6 +8637,7 @@ extern "C" {
 // SCREEN: ui_ScreenWeather
 extern void ui_ScreenWeather_screen_init(void);
 extern void ui_ScreenWeather_screen_destroy(void);
+extern void ui_ScreenWeather_full_init(void);
 extern void ui_event_ScreenWeather(lv_event_t * e);
 extern lv_obj_t * ui_ScreenWeather;
 extern lv_obj_t * ui_Label11;
@@ -8713,6 +8725,7 @@ bool svc_screen_sleep_is_sleeping(void);
 #include "svc_auto_brightness.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "screen_aod_logic.h"
 
 static const char *TAG = "SVC_SLEEP";
 
@@ -8746,6 +8759,8 @@ void svc_screen_sleep_wake_up(void)
     s_idle_seconds = 0;
     if (!s_sleeping) return;
 
+    screen_aod_exit();
+
     s_sleeping = false;
     if (svc_auto_brightness_is_enabled()) {
         svc_auto_brightness_resume(true);
@@ -8759,9 +8774,12 @@ void svc_screen_sleep_force_sleep(void)
 {
     if (!s_enabled || s_sleeping) return;
 
+    screen_aod_enter();
+    
+    bsp_display_set_brightness(20); 
+
     s_sleeping = true;
     svc_auto_brightness_suspend();
-    bsp_display_set_brightness(0);
     ESP_LOGI(TAG, "Screen put to sleep");
 }
 
@@ -8785,6 +8803,7 @@ idf_component_register(
         log
         bsp_display
         svc_auto_brightness
+        screen_aod
 )
 
 ===== ./bsp_display/bsp_display.c =====
@@ -8867,6 +8886,7 @@ extern "C" {
 // SCREEN: ui_ScreenTimeUtils
 extern void ui_ScreenTimeUtils_screen_init(void);
 extern void ui_ScreenTimeUtils_screen_destroy(void);
+extern void ui_ScreenTimeUtils_full_init(void);
 extern void ui_event_ScreenTimeUtils(lv_event_t * e);
 extern lv_obj_t * ui_ScreenTimeUtils;
 extern lv_obj_t * ui_TabView2;
@@ -9263,18 +9283,18 @@ lv_obj_t * ui_TabView2 = NULL;
 lv_obj_t * ui_TabPageTimer = NULL;
 lv_obj_t * ui_TabPageStopwatch = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenTimeUtils(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenPhone_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalc_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenPhone_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalc_full_init);
+}
 }
 
 // build funtions
@@ -9454,18 +9474,18 @@ lv_obj_t * ui_Label38 = NULL;
 lv_obj_t * ui_Button20 = NULL;
 lv_obj_t * ui_Label39 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenCalc(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalendar_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenTimeUtils_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalendar_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenTimeUtils_full_init);
+}
 }
 
 // build funtions
@@ -9948,6 +9968,7 @@ extern "C" {
 // SCREEN: ui_ScreenCalc
 extern void ui_ScreenCalc_screen_init(void);
 extern void ui_ScreenCalc_screen_destroy(void);
+extern void ui_ScreenCalc_full_init(void);
 extern void ui_event_ScreenCalc(lv_event_t * e);
 extern lv_obj_t * ui_ScreenCalc;
 extern lv_obj_t * ui_Container1;
@@ -10387,6 +10408,7 @@ extern "C" {
 // SCREEN: ui_ScreenSystem
 extern void ui_ScreenSystem_screen_init(void);
 extern void ui_ScreenSystem_screen_destroy(void);
+extern void ui_ScreenSystem_full_init(void);
 extern void ui_event_ScreenSystem(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSystem;
 extern lv_obj_t * ui_Label15;
@@ -10429,18 +10451,18 @@ void ui_ScreenSystem_full_init(void);
 lv_obj_t * ui_ScreenSystem = NULL;
 lv_obj_t * ui_Label15 = NULL;
 // event funtions
+// event funtions
 void ui_event_ScreenSystem(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSD_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSettings_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSD_full_init);
+}
+if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSettings_full_init);
+}
 }
 
 // build funtions
@@ -10731,6 +10753,7 @@ extern "C" {
 // SCREEN: ui_ScreenIR
 extern void ui_ScreenIR_screen_init(void);
 extern void ui_ScreenIR_screen_destroy(void);
+extern void ui_ScreenIR_full_init(void);
 extern void ui_event_ScreenIR(lv_event_t * e);
 extern lv_obj_t * ui_ScreenIR;
 extern lv_obj_t * ui_IRTabView;
@@ -10858,14 +10881,14 @@ lv_obj_t * ui_ScreenIR = NULL;
 lv_obj_t * ui_IRTabView = NULL;
 
 // event funtions
+// event funtions
 void ui_event_ScreenIR(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if (event_code == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_active());
-        _ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSys_screen_init);
-    }
+lv_event_code_t event_code = lv_event_get_code(e);
+if (event_code == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+lv_indev_wait_release(lv_indev_active());
+_ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSys_full_init);
+}
 }
 
 // =========================================================
