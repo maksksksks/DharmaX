@@ -168,7 +168,9 @@ $<TARGET_FILE:idf::ui_resources>
 $<TARGET_FILE:__idf_lvgl__lvgl>
 $<TARGET_FILE:idf::bsp_display>
 $<TARGET_FILE:__idf_esp_lcd>
+$<TARGET_FILE:idf::adc_shared>
 $<TARGET_FILE:idf::drv_phtrz>
+$<TARGET_FILE:__idf_adc_shared>
 $<TARGET_FILE:idf::svc_auto_brightness>
 $<TARGET_FILE:__idf_drv_phtrz>
 $<TARGET_FILE:__idf_app_core>

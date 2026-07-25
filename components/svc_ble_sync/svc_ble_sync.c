@@ -12,8 +12,8 @@
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "store/config/ble_store_config.h"
-//#include "svc_screen_sleep.h"
-//#include "svc_vibro.h"
+#include "svc_screen_sleep.h"
+#include "svc_vibro.h"
 #include "sys/time.h"
 #include <freertos/queue.h>
 
@@ -73,59 +73,55 @@ static int ble_store_load_cb(int obj_type, union ble_store_value *val, void *arg
  * @brief Парсит строку лога в формате ESP-IDF: "I (1234) TAG: message"
  * @return true если успешно распаршено
  */
-static bool parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
-    // Формат: "X (12345) TAG: message"
-    //         012        3456789...
-    
-    // 1. Уровень (первый символ)
-    if (strlen(full_msg) < 10) return false;
+// Возвращает: 1 = распарсено успешно, 0 = не распарсилось, -1 = отфильтровано (пропустить)
+static int parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
+    if (strlen(full_msg) < 10) return 0;
     
     char level_char = full_msg[0];
     item->level = ESP_LOG_INFO;
     if (level_char == 'E') item->level = ESP_LOG_ERROR;
     else if (level_char == 'W') item->level = ESP_LOG_WARN;
     else if (level_char == 'D') item->level = ESP_LOG_DEBUG;
-    // 'I' и остальные → INFO
-    
-    // 2. Пропускаем " (12345) " — ищем закрывающую скобку
+
     const char *paren_close = strchr(full_msg, ')');
-    if (!paren_close) return false;
+    if (!paren_close) return 0;
     
-    // 3. После скобки: пробелы → тег → двоеточие
     const char *after_paren = paren_close + 1;
-    while (*after_paren == ' ') after_paren++;  // пропускаем пробелы
+    while (*after_paren == ' ') after_paren++;
     
-    // 4. Находим двоеточие после тега
     const char *colon = strchr(after_paren, ':');
-    if (!colon) return false;
+    if (!colon) return 0;
     
-    // 5. Извлекаем тег (между после_скобки и двоеточием)
     size_t tag_len = colon - after_paren;
-    if (tag_len == 0 || tag_len >= sizeof(item->tag)) return false;
+    if (tag_len == 0 || tag_len >= sizeof(item->tag)) return 0;
     
     strncpy(item->tag, after_paren, tag_len);
     item->tag[tag_len] = '\0';
 
-    // ★ ФИЛЬТР: пропускаем внутренние логи NimBLE и ESP
-    if (strcmp(item->tag, "NimBLE") == 0) return false;
-    if (strcmp(item->tag, "esp_image") == 0) return false;
-    if (strcmp(item->tag, "boot") == 0) return false;
-    if (strcmp(item->tag, "phy_init") == 0) return false;
-    if (strcmp(item->tag, "heap_init") == 0) return false;
-    // Добавьте другие системные теги по мере необходимости
+    // ★ ФИЛЬТР: возвращаем -1 (пропустить), а не 0!
+    if (strcmp(item->tag, "NimBLE") == 0) return -1;
+    if (strcmp(item->tag, "esp_image") == 0) return -1;
+    if (strcmp(item->tag, "boot") == 0) return -1;
+    if (strcmp(item->tag, "phy_init") == 0) return -1;
+    if (strcmp(item->tag, "heap_init") == 0) return -1;
+    if (strcmp(item->tag, "wifi") == 0) return -1;
+    if (strcmp(item->tag, "BT_PHY") == 0) return -1;
+    if (strcmp(item->tag, "BT_BTM") == 0) return -1;
+    if (strcmp(item->tag, "BT_L2CAP") == 0) return -1;
+    if (strcmp(item->tag, "BT_SMP") == 0) return -1;
+    if (strcmp(item->tag, "BT_GATT") == 0) return -1;
     
-    // ★ ОПЦИОНАЛЬНО: фильтр по содержанию сообщения
-    if (strstr(item->msg, "GATT procedure initiated") != NULL) return false;
-    if (strstr(item->msg, "att_handle=") != NULL) return false;
-    
-    // 6. Сообщение: после ": " 
     const char *msg_start = colon + 1;
-    while (*msg_start == ' ') msg_start++;  // пропускаем пробел после :
+    while (*msg_start == ' ') msg_start++;
+    
+    // ★ Фильтр по содержимому (тоже -1)
+    if (strstr(msg_start, "GATT procedure initiated") != NULL) return -1;
+    if (strstr(msg_start, "att_handle=") != NULL) return -1;
     
     strncpy(item->msg, msg_start, sizeof(item->msg) - 1);
     item->msg[sizeof(item->msg) - 1] = '\0';
     
-    return true;
+    return 1; // успешно распарсено
 }
 
 /**
@@ -173,20 +169,26 @@ static int ble_log_hook_vprintf(const char *fmt, va_list args) {
         return ret;
     }
 
-    // 4. Парсим строку в формате ESP-IDF
+    // 4. Парсим строку
     ble_log_item_t *item = malloc(sizeof(ble_log_item_t));
     if (!item) return ret;
 
     item->timestamp_ms = esp_timer_get_time() / 1000;
 
-    if (!parse_esp_log_line(full_msg, item)) {
-        // Не удалось распарсить — возможно, это не стандартный ESP_LOG
-        // Попробуем сохранить как есть с дефолтным тегом
+    int parse_result = parse_esp_log_line(full_msg, item);
+    if (parse_result == -1) {
+        // ★ ОТФИЛЬТРОВАНО — просто пропускаем, НЕ отправляем!
+        free(item);
+        return ret;
+    }
+    if (parse_result == 0) {
+        // Не удалось распарсить — отправляем как есть
         item->level = ESP_LOG_INFO;
         strncpy(item->tag, "APP", sizeof(item->tag) - 1);
         strncpy(item->msg, full_msg, sizeof(item->msg) - 1);
         item->msg[sizeof(item->msg) - 1] = '\0';
     }
+    // parse_result == 1 → уже заполнено, отправляем
 
     // 6. Отправка в очередь
     if (xQueueIsQueueFullFromISR(log_queue)) {
@@ -305,7 +307,7 @@ static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct bl
             struct timeval tv = {.tv_sec = epoch_time, .tv_usec = 0};
             settimeofday(&tv, NULL);
             esp_event_post(APP_EVENTS, EVT_BLE_TIME_SYNCED, NULL, 0, pdMS_TO_TICKS(100));
-            //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
             return 0;
         } else {
             ESP_LOGE(TAG, "Неверный размер пакета!");
@@ -349,7 +351,7 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct 
             // ОБРАБОТКА НОВОГО УВЕДОМЛЕНИЯ (n_new)
             // ==========================================
             if (strcmp(type_item->valuestring, "n_new") == 0) {
-                //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_LONG);
+                svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_LONG);
                 cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
                 if (cJSON_IsObject(data)) {
                     notify_data n_data;
@@ -388,7 +390,7 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct 
             // ОБРАБОТКА УДАЛЕНИЯ УВЕДОМЛЕНИЯ (n_del)
             // ==========================================
             else if (strcmp(type_item->valuestring, "n_del") == 0) {
-                //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_MEDIUM, DURATION_LONG);
+                svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_MEDIUM, DURATION_LONG);
                 cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
                 if (cJSON_IsObject(data)) {
                     notify_del_data del_data;
@@ -550,19 +552,19 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
             struct ble_gap_conn_desc desc;
             if (ble_gap_conn_find(active_conn_handle, &desc) == 0) {
                 if (desc.sec_state.encrypted) {
-                    ESP_LOGI(TAG, "✓ Соединение уже зашифровано (bond восстановлен)");
+                    ESP_LOGI(TAG, "✓ Соединение уже зашифровано (bond восстановлен из NVS)");
                 } else {
-                    ESP_LOGI(TAG, "⏳ Ожидаем шифрование от central (LTK из NVS)");
-
-                    // ★ НОВОЕ: Логируем адрес для отладки распознавания
-                    ESP_LOGI(TAG, "Peer address: %02X:%02X:%02X:%02X:%02X:%02X (type=%d)", desc.peer_id_addr.val[5],
-                             desc.peer_id_addr.val[4], desc.peer_id_addr.val[3], desc.peer_id_addr.val[2],
-                             desc.peer_id_addr.val[1], desc.peer_id_addr.val[0], desc.peer_id_addr.type);
+                    ESP_LOGI(TAG, "⏳ Соединение не зашифровано. Инициируем запрос на сопряжение...");
+                    // Принудительно запускаем процесс сопряжения (вызовет BLE_GAP_EVENT_PASSKEY_ACTION)
+                    int rc_sec = ble_gap_security_initiate(event->connect.conn_handle);
+                    if (rc_sec != 0) {
+                        ESP_LOGE(TAG, "Ошибка инициации безопасности: %d", rc_sec);
+                    }
                 }
             }
         }
 
-        //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         ble_advertising = false;
         active_conn_handle = event->connect.conn_handle;
         {
@@ -579,7 +581,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         active_conn_handle = 0;
         // Стираем PIN с экрана, если он там остался
         esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
-        //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
         if (ble_running)
             ble_advertise();
         break;
@@ -588,7 +590,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         if (event->enc_change.status == 0) {
             ESP_LOGI(TAG, "✓ Шифрование установлено успешно");
             esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
-            //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         } else {
             ESP_LOGE(TAG, "✗ Ошибка шифрования: 0x%04X (%d) — НЕ трогаем bond, ждём восстановления",
                      event->enc_change.status, event->enc_change.status);
@@ -625,7 +627,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         ESP_LOGI(TAG, "PASSKEY_ACTION event");
         // Если стек просит нас показать PIN-код (DISP)
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
-            //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
             //if (svc_screen_sleep_is_sleeping()) {
             //    svc_screen_sleep_wake_up();
             //}
@@ -660,31 +662,17 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
-        // ★ FIX: IGNORE вместо RETRY+delete.
-        //
-        // REPEAT_PAIRING приходит, когда central пытается инициировать pairing, но у нас
-        // уже есть bond для этого устройства. Раньше мы удаляли ключи и разрешали новое
-        // pairing (RETRY) — это и есть главный источник "PIN loop": любая попытка Android
-        // переустановить шифрование ошибочно принималась за re-pairing, bond стирался,
-        // и пользователь видел новый диалог PIN на каждом реконнекте.
-        //
-        // Правильное поведение: вернуть IGNORE → стек откажет в новом pairing, но сохранит
-        // существующий LTK. Central (Android) тогда использует сохранённые у себя ключи для
-        // шифрования. Это устраняет pairing loop полностью.
-        //
-        // Если у пользователя действительно нужно пересопрячься (другое устройство или
-        // сброшенные ключи на телефоне), он явно вызовет svc_ble_delete_all_peers() из
-        // настроек часов и пересопряжётся с чистого листа.
-        struct ble_gap_conn_desc rp_desc;
-        int rc_rp = ble_gap_conn_find(event->repeat_pairing.conn_handle, &rp_desc);
+        struct ble_gap_conn_desc desc;
+        int rc_rp = ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
         if (rc_rp == 0) {
-            ESP_LOGW(TAG, "REPEAT_PAIRING от %02x:%02x:%02x:%02x:%02x:%02x — игнорируем, храним существующий bond",
-                     rp_desc.peer_id_addr.val[5], rp_desc.peer_id_addr.val[4], rp_desc.peer_id_addr.val[3],
-                     rp_desc.peer_id_addr.val[2], rp_desc.peer_id_addr.val[1], rp_desc.peer_id_addr.val[0]);
+            ESP_LOGW(TAG, "🔄 REPEAT_PAIRING: Телефон пытается пересопрячься (видимо, забыл устройство). Удаляем старый ключ и разрешаем новое сопряжение.");
+            // Удаляем старый недействительный ключ для этого адреса
+            ble_store_util_delete_peer(&desc.peer_id_addr);
         } else {
-            ESP_LOGW(TAG, "REPEAT_PAIRING (desc lookup rc=%d) — игнорируем", rc_rp);
+            ESP_LOGW(TAG, "🔄 REPEAT_PAIRING (desc lookup rc=%d) — разрешаем новое сопряжение", rc_rp);
         }
-        return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        // КРИТИЧНО: Возвращаем RETRY, а не IGNORE!
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
 
     default:
@@ -740,6 +728,14 @@ static void ble_on_sync(void) {
         return;
     }
 
+    int peer_count = 0;
+    esp_err_t rc_count = ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &peer_count);
+    if (rc_count == ESP_OK) {
+        ESP_LOGI(TAG, "✅ Найдено сохранённых устройств (ключей) в NVS: %d", peer_count);
+    } else {
+        ESP_LOGW(TAG, "⚠ Не удалось получить количество ключей: %d", rc_count);
+    }
+
     if (ble_running)
         ble_advertise();
 }
@@ -764,15 +760,7 @@ static void ble_host_task(void *param) {
 static void ble_do_init(void) {
     int rc;
 
-    // ★ ОТЛАДКА: Убедимся, что NVS работает!
-    nvs_handle_t handle;
-    rc = nvs_open("nimble_bond", NVS_READONLY, &handle);
-    if (rc == ESP_OK) {
-        ESP_LOGI(TAG, "✅ NVS хранилище NimBLE доступно (ключи будут жить во Flash)");
-        nvs_close(handle);
-    } else {
-        ESP_LOGW(TAG, "❌ ВНИМАНИЕ! NVS хранилище NimBLE НЕ НАЙДЕНО! Ключи будут теряться при перезагрузке!");
-    }
+    
 
     ble_initialized = true;
     ble_running = true; // Помечаем сразу, чтобы settings_tile знал
@@ -835,6 +823,28 @@ static void ble_do_init(void) {
     ble_store_config_init();
 
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Попробуем записать и прочитать тестовый ключ
+    ESP_LOGI(TAG, "Тест записи в BLE store...");
+    struct ble_store_value_sec test_sec;
+    memset(&test_sec, 0, sizeof(test_sec));
+    test_sec.peer_addr.type = BLE_ADDR_PUBLIC;
+    memcpy(test_sec.peer_addr.val, "\x01\x02\x03\x04\x05\x06", 6);
+    test_sec.ltk_present = 1;
+    
+    int rc_write = ble_store_write_peer_sec(&test_sec);
+    ESP_LOGI(TAG, "  write rc=%d", rc_write);
+    
+    struct ble_store_key_sec key_sec;
+    memset(&key_sec, 0, sizeof(key_sec));
+    key_sec.peer_addr = test_sec.peer_addr;
+    
+    struct ble_store_value_sec read_sec;
+    int rc_read = ble_store_read_peer_sec(&key_sec, &read_sec);
+    ESP_LOGI(TAG, "  read rc=%d (0=OK)", rc_read);
+    
+    // Удаляем тестовый ключ
+    ble_store_util_delete_peer(&test_sec.peer_addr);
 
     // Опционально: проверить, что ключи действительно загружены
     //int peer_count = ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, NULL);

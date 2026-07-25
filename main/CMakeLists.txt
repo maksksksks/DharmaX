@@ -17,4 +17,8 @@ idf_component_register(
             svc_screen_sleep
             svc_vibro
             ui_pairing_popup
+            drv_phtrz
+            drv_battery
+            svc_battery_monitor
+            svc_auto_brightness
 )

@@ -1,22 +1,12 @@
 /**
  * @file drv_vibro.h
- * @brief Драйвер вибромотора для Waveshare ESP32-S3-1.47
- *
- * ГЛАВОЕ ПРАВИЛО: Используем отдельный LEDC таймер от подсветки!
- * Backlight обычно занимает LEDC_TIMER_0 → мы берём LEDC_TIMER_1
+ * @brief Драйвер вибромотора 
  */
 
 #pragma once
 #include <stdbool.h>
 #include <stdio.h>
 
-/* ============================================================
- *  КОНФИГУРАЦИЯ PWM
- *
- * Waveshare ESP32-S3-1.47 назначение LEDC:
- *   - LEDC_TIMER_0 + CHANNEL_x → Подсветка дисплея (BSP)
- *   - LEDC_TIMER_1 + CHANNEL_0 → ВИБРОМОТОР (мы) ← ИЗБЕГАЕМ КОНФЛИКТА!
- * ============================================================ */
 
 // ✅ ИСПРАВЛЕНО: Таймер 1 вместо 0!
 #define VIB_LEDC_TIMER LEDC_TIMER_1 // Был TIMER_0 → теперь TIMER_1
@@ -28,7 +18,7 @@
 
 #define VIB_LEDC_FREQUENCY 200 // Hz (для ERM/LRA моторов)
 
-#define PIN_VIBRO 5
+#define PIN_VIBRO 18
 
 /* ============================================================
  *  API

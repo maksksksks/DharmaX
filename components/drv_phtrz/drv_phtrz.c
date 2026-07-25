@@ -1,17 +1,12 @@
 #include "drv_phtrz.h"
-#include "esp_adc/adc_oneshot.h"
+#include "adc_shared.h" 
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 
-// На официальной плате Waveshare ESP32-S3-Touch-AMOLED-1.64 встроенного
-// фоторезистора нет (канал 3 в их demo - это системное/аккумуляторное
-// напряжение, см. drv_battery.c). Датчик освещённости - ваш собственный,
-// внешний, так что канал ниже - ЗАГЛУШКА. Поменяйте на тот, к которому
-// реально припаян фоторезистор на вашей плате (любой свободный ADC1-канал,
-// кроме занятого батареей CHANNEL_3).
+
 #define PHTRZ_ADC_UNIT     ADC_UNIT_1
-#define PHTRZ_ADC_CHANNEL  ADC_CHANNEL_2  // TODO: проверьте под свою распайку
+#define PHTRZ_ADC_CHANNEL  ADC_CHANNEL_7
 #define PHTRZ_ADC_ATTEN    ADC_ATTEN_DB_12
 #define PHTRZ_ADC_BITWIDTH ADC_BITWIDTH_12
 
@@ -29,8 +24,12 @@ void drv_phtrz_init(void)
         return;
     }
 
-    adc_oneshot_unit_init_cfg_t init_config = { .unit_id = PHTRZ_ADC_UNIT };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &s_adc_handle));
+    // ★ Берём общий handle
+    s_adc_handle = adc_shared_get_handle();
+    if (s_adc_handle == NULL) {
+        ESP_LOGE(TAG, "ADC1 not available");
+        return;
+    }
 
     adc_oneshot_chan_cfg_t chan_config = {
         .bitwidth = PHTRZ_ADC_BITWIDTH,
@@ -45,9 +44,6 @@ void drv_phtrz_init(void)
         .bitwidth = PHTRZ_ADC_BITWIDTH,
     };
     s_calibrated = (adc_cali_create_scheme_curve_fitting(&cali_config, &s_cali_handle) == ESP_OK);
-    if (!s_calibrated) {
-        ESP_LOGW(TAG, "ADC calibration недоступна, используем сырые отсчёты");
-    }
 
     s_initialized = true;
     ESP_LOGI(TAG, "Photoresistor ADC initialized on channel %d", PHTRZ_ADC_CHANNEL);
@@ -74,6 +70,7 @@ bool drv_phtrz_get_data(int *value)
     // Без множителя x3 (в отличие от батареи) - svc_auto_brightness калиброван
     // именно под сырое напряжение в мВ (BRIGHTNESS_LOW_VALUE=300,
     // BRIGHTNESS_HIGH_VALUE=1700 - это диапазон мВ, не вольт).
+    ESP_LOGI(TAG, "raw=%d, voltage=%d mV", adc_raw, mv);
     *value = mv;
     return true;
 }

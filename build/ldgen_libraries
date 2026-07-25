@@ -168,7 +168,9 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/lvgl__lvgl/liblvgl__lvgl.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/bsp_display/libbsp_display.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/esp_lcd/libesp_lcd.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/libadc_shared.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/libdrv_phtrz.a
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/libadc_shared.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/svc_auto_brightness/libsvc_auto_brightness.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/libdrv_phtrz.a
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/app_core/libapp_core.a

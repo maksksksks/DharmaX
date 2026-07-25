@@ -589,6 +589,11 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
+  include("/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
   include("/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/cmake_install.cmake")
 endif()
 

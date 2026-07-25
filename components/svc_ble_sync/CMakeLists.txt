@@ -8,8 +8,8 @@ idf_component_register(
         bt 
         app_core 
         nvs_flash
-        #svc_vibro
+        svc_vibro
         ui
-        #svc_screen_sleep
+        svc_screen_sleep
         json
 )

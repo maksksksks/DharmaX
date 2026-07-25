@@ -1,5 +1,5 @@
 #include "drv_battery.h"
-#include "esp_adc/adc_oneshot.h"
+#include "adc_shared.h"  
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
@@ -47,15 +47,21 @@ void drv_battery_init(void)
         return;
     }
 
-    adc_oneshot_unit_init_cfg_t init_config = { .unit_id = BATTERY_ADC_UNIT };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &s_adc_handle));
+    // ★ Берём общий handle вместо adc_oneshot_new_unit()
+    s_adc_handle = adc_shared_get_handle();
+    if (s_adc_handle == NULL) {
+        ESP_LOGE(TAG, "ADC1 not available");
+        return;
+    }
 
+    // Конфигурируем ТОЛЬКО свой канал
     adc_oneshot_chan_cfg_t chan_config = {
         .bitwidth = BATTERY_ADC_BITWIDTH,
         .atten = BATTERY_ADC_ATTEN,
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, BATTERY_ADC_CHANNEL, &chan_config));
 
+    // Калибровка (без изменений)
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = BATTERY_ADC_UNIT,
         .chan = BATTERY_ADC_CHANNEL,
@@ -64,7 +70,7 @@ void drv_battery_init(void)
     };
     s_calibrated = (adc_cali_create_scheme_curve_fitting(&cali_config, &s_cali_handle) == ESP_OK);
     if (!s_calibrated) {
-        ESP_LOGW(TAG, "ADC calibration недоступна (eFuse не прошит?), точность будет ниже");
+        ESP_LOGW(TAG, "ADC calibration unavailable");
     }
 
     s_initialized = true;

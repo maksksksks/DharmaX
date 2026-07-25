@@ -3672,8 +3672,8 @@ void svc_ble_delete_all_peers(void);
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "store/config/ble_store_config.h"
-//#include "svc_screen_sleep.h"
-//#include "svc_vibro.h"
+#include "svc_screen_sleep.h"
+#include "svc_vibro.h"
 #include "sys/time.h"
 #include <freertos/queue.h>
 
@@ -3733,59 +3733,55 @@ static int ble_store_load_cb(int obj_type, union ble_store_value *val, void *arg
  * @brief Парсит строку лога в формате ESP-IDF: "I (1234) TAG: message"
  * @return true если успешно распаршено
  */
-static bool parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
-    // Формат: "X (12345) TAG: message"
-    //         012        3456789...
-    
-    // 1. Уровень (первый символ)
-    if (strlen(full_msg) < 10) return false;
+// Возвращает: 1 = распарсено успешно, 0 = не распарсилось, -1 = отфильтровано (пропустить)
+static int parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
+    if (strlen(full_msg) < 10) return 0;
     
     char level_char = full_msg[0];
     item->level = ESP_LOG_INFO;
     if (level_char == 'E') item->level = ESP_LOG_ERROR;
     else if (level_char == 'W') item->level = ESP_LOG_WARN;
     else if (level_char == 'D') item->level = ESP_LOG_DEBUG;
-    // 'I' и остальные → INFO
-    
-    // 2. Пропускаем " (12345) " — ищем закрывающую скобку
+
     const char *paren_close = strchr(full_msg, ')');
-    if (!paren_close) return false;
+    if (!paren_close) return 0;
     
-    // 3. После скобки: пробелы → тег → двоеточие
     const char *after_paren = paren_close + 1;
-    while (*after_paren == ' ') after_paren++;  // пропускаем пробелы
+    while (*after_paren == ' ') after_paren++;
     
-    // 4. Находим двоеточие после тега
     const char *colon = strchr(after_paren, ':');
-    if (!colon) return false;
+    if (!colon) return 0;
     
-    // 5. Извлекаем тег (между после_скобки и двоеточием)
     size_t tag_len = colon - after_paren;
-    if (tag_len == 0 || tag_len >= sizeof(item->tag)) return false;
+    if (tag_len == 0 || tag_len >= sizeof(item->tag)) return 0;
     
     strncpy(item->tag, after_paren, tag_len);
     item->tag[tag_len] = '\0';
 
-    // ★ ФИЛЬТР: пропускаем внутренние логи NimBLE и ESP
-    if (strcmp(item->tag, "NimBLE") == 0) return false;
-    if (strcmp(item->tag, "esp_image") == 0) return false;
-    if (strcmp(item->tag, "boot") == 0) return false;
-    if (strcmp(item->tag, "phy_init") == 0) return false;
-    if (strcmp(item->tag, "heap_init") == 0) return false;
-    // Добавьте другие системные теги по мере необходимости
+    // ★ ФИЛЬТР: возвращаем -1 (пропустить), а не 0!
+    if (strcmp(item->tag, "NimBLE") == 0) return -1;
+    if (strcmp(item->tag, "esp_image") == 0) return -1;
+    if (strcmp(item->tag, "boot") == 0) return -1;
+    if (strcmp(item->tag, "phy_init") == 0) return -1;
+    if (strcmp(item->tag, "heap_init") == 0) return -1;
+    if (strcmp(item->tag, "wifi") == 0) return -1;
+    if (strcmp(item->tag, "BT_PHY") == 0) return -1;
+    if (strcmp(item->tag, "BT_BTM") == 0) return -1;
+    if (strcmp(item->tag, "BT_L2CAP") == 0) return -1;
+    if (strcmp(item->tag, "BT_SMP") == 0) return -1;
+    if (strcmp(item->tag, "BT_GATT") == 0) return -1;
     
-    // ★ ОПЦИОНАЛЬНО: фильтр по содержанию сообщения
-    if (strstr(item->msg, "GATT procedure initiated") != NULL) return false;
-    if (strstr(item->msg, "att_handle=") != NULL) return false;
-    
-    // 6. Сообщение: после ": " 
     const char *msg_start = colon + 1;
-    while (*msg_start == ' ') msg_start++;  // пропускаем пробел после :
+    while (*msg_start == ' ') msg_start++;
+    
+    // ★ Фильтр по содержимому (тоже -1)
+    if (strstr(msg_start, "GATT procedure initiated") != NULL) return -1;
+    if (strstr(msg_start, "att_handle=") != NULL) return -1;
     
     strncpy(item->msg, msg_start, sizeof(item->msg) - 1);
     item->msg[sizeof(item->msg) - 1] = '\0';
     
-    return true;
+    return 1; // успешно распарсено
 }
 
 /**
@@ -3833,20 +3829,26 @@ static int ble_log_hook_vprintf(const char *fmt, va_list args) {
         return ret;
     }
 
-    // 4. Парсим строку в формате ESP-IDF
+    // 4. Парсим строку
     ble_log_item_t *item = malloc(sizeof(ble_log_item_t));
     if (!item) return ret;
 
     item->timestamp_ms = esp_timer_get_time() / 1000;
 
-    if (!parse_esp_log_line(full_msg, item)) {
-        // Не удалось распарсить — возможно, это не стандартный ESP_LOG
-        // Попробуем сохранить как есть с дефолтным тегом
+    int parse_result = parse_esp_log_line(full_msg, item);
+    if (parse_result == -1) {
+        // ★ ОТФИЛЬТРОВАНО — просто пропускаем, НЕ отправляем!
+        free(item);
+        return ret;
+    }
+    if (parse_result == 0) {
+        // Не удалось распарсить — отправляем как есть
         item->level = ESP_LOG_INFO;
         strncpy(item->tag, "APP", sizeof(item->tag) - 1);
         strncpy(item->msg, full_msg, sizeof(item->msg) - 1);
         item->msg[sizeof(item->msg) - 1] = '\0';
     }
+    // parse_result == 1 → уже заполнено, отправляем
 
     // 6. Отправка в очередь
     if (xQueueIsQueueFullFromISR(log_queue)) {
@@ -3965,7 +3967,7 @@ static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct bl
             struct timeval tv = {.tv_sec = epoch_time, .tv_usec = 0};
             settimeofday(&tv, NULL);
             esp_event_post(APP_EVENTS, EVT_BLE_TIME_SYNCED, NULL, 0, pdMS_TO_TICKS(100));
-            //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
             return 0;
         } else {
             ESP_LOGE(TAG, "Неверный размер пакета!");
@@ -4009,7 +4011,7 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct 
             // ОБРАБОТКА НОВОГО УВЕДОМЛЕНИЯ (n_new)
             // ==========================================
             if (strcmp(type_item->valuestring, "n_new") == 0) {
-                //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_LONG);
+                svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_LONG);
                 cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
                 if (cJSON_IsObject(data)) {
                     notify_data n_data;
@@ -4048,7 +4050,7 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct 
             // ОБРАБОТКА УДАЛЕНИЯ УВЕДОМЛЕНИЯ (n_del)
             // ==========================================
             else if (strcmp(type_item->valuestring, "n_del") == 0) {
-                //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_MEDIUM, DURATION_LONG);
+                svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_MEDIUM, DURATION_LONG);
                 cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
                 if (cJSON_IsObject(data)) {
                     notify_del_data del_data;
@@ -4210,19 +4212,19 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
             struct ble_gap_conn_desc desc;
             if (ble_gap_conn_find(active_conn_handle, &desc) == 0) {
                 if (desc.sec_state.encrypted) {
-                    ESP_LOGI(TAG, "✓ Соединение уже зашифровано (bond восстановлен)");
+                    ESP_LOGI(TAG, "✓ Соединение уже зашифровано (bond восстановлен из NVS)");
                 } else {
-                    ESP_LOGI(TAG, "⏳ Ожидаем шифрование от central (LTK из NVS)");
-
-                    // ★ НОВОЕ: Логируем адрес для отладки распознавания
-                    ESP_LOGI(TAG, "Peer address: %02X:%02X:%02X:%02X:%02X:%02X (type=%d)", desc.peer_id_addr.val[5],
-                             desc.peer_id_addr.val[4], desc.peer_id_addr.val[3], desc.peer_id_addr.val[2],
-                             desc.peer_id_addr.val[1], desc.peer_id_addr.val[0], desc.peer_id_addr.type);
+                    ESP_LOGI(TAG, "⏳ Соединение не зашифровано. Инициируем запрос на сопряжение...");
+                    // Принудительно запускаем процесс сопряжения (вызовет BLE_GAP_EVENT_PASSKEY_ACTION)
+                    int rc_sec = ble_gap_security_initiate(event->connect.conn_handle);
+                    if (rc_sec != 0) {
+                        ESP_LOGE(TAG, "Ошибка инициации безопасности: %d", rc_sec);
+                    }
                 }
             }
         }
 
-        //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         ble_advertising = false;
         active_conn_handle = event->connect.conn_handle;
         {
@@ -4239,7 +4241,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         active_conn_handle = 0;
         // Стираем PIN с экрана, если он там остался
         esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
-        //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
+        svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
         if (ble_running)
             ble_advertise();
         break;
@@ -4248,7 +4250,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         if (event->enc_change.status == 0) {
             ESP_LOGI(TAG, "✓ Шифрование установлено успешно");
             esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
-            //svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
         } else {
             ESP_LOGE(TAG, "✗ Ошибка шифрования: 0x%04X (%d) — НЕ трогаем bond, ждём восстановления",
                      event->enc_change.status, event->enc_change.status);
@@ -4285,7 +4287,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         ESP_LOGI(TAG, "PASSKEY_ACTION event");
         // Если стек просит нас показать PIN-код (DISP)
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
-            //svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
+            svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
             //if (svc_screen_sleep_is_sleeping()) {
             //    svc_screen_sleep_wake_up();
             //}
@@ -4320,31 +4322,17 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
-        // ★ FIX: IGNORE вместо RETRY+delete.
-        //
-        // REPEAT_PAIRING приходит, когда central пытается инициировать pairing, но у нас
-        // уже есть bond для этого устройства. Раньше мы удаляли ключи и разрешали новое
-        // pairing (RETRY) — это и есть главный источник "PIN loop": любая попытка Android
-        // переустановить шифрование ошибочно принималась за re-pairing, bond стирался,
-        // и пользователь видел новый диалог PIN на каждом реконнекте.
-        //
-        // Правильное поведение: вернуть IGNORE → стек откажет в новом pairing, но сохранит
-        // существующий LTK. Central (Android) тогда использует сохранённые у себя ключи для
-        // шифрования. Это устраняет pairing loop полностью.
-        //
-        // Если у пользователя действительно нужно пересопрячься (другое устройство или
-        // сброшенные ключи на телефоне), он явно вызовет svc_ble_delete_all_peers() из
-        // настроек часов и пересопряжётся с чистого листа.
-        struct ble_gap_conn_desc rp_desc;
-        int rc_rp = ble_gap_conn_find(event->repeat_pairing.conn_handle, &rp_desc);
+        struct ble_gap_conn_desc desc;
+        int rc_rp = ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
         if (rc_rp == 0) {
-            ESP_LOGW(TAG, "REPEAT_PAIRING от %02x:%02x:%02x:%02x:%02x:%02x — игнорируем, храним существующий bond",
-                     rp_desc.peer_id_addr.val[5], rp_desc.peer_id_addr.val[4], rp_desc.peer_id_addr.val[3],
-                     rp_desc.peer_id_addr.val[2], rp_desc.peer_id_addr.val[1], rp_desc.peer_id_addr.val[0]);
+            ESP_LOGW(TAG, "🔄 REPEAT_PAIRING: Телефон пытается пересопрячься (видимо, забыл устройство). Удаляем старый ключ и разрешаем новое сопряжение.");
+            // Удаляем старый недействительный ключ для этого адреса
+            ble_store_util_delete_peer(&desc.peer_id_addr);
         } else {
-            ESP_LOGW(TAG, "REPEAT_PAIRING (desc lookup rc=%d) — игнорируем", rc_rp);
+            ESP_LOGW(TAG, "🔄 REPEAT_PAIRING (desc lookup rc=%d) — разрешаем новое сопряжение", rc_rp);
         }
-        return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        // КРИТИЧНО: Возвращаем RETRY, а не IGNORE!
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
 
     default:
@@ -4400,6 +4388,14 @@ static void ble_on_sync(void) {
         return;
     }
 
+    int peer_count = 0;
+    esp_err_t rc_count = ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &peer_count);
+    if (rc_count == ESP_OK) {
+        ESP_LOGI(TAG, "✅ Найдено сохранённых устройств (ключей) в NVS: %d", peer_count);
+    } else {
+        ESP_LOGW(TAG, "⚠ Не удалось получить количество ключей: %d", rc_count);
+    }
+
     if (ble_running)
         ble_advertise();
 }
@@ -4424,15 +4420,7 @@ static void ble_host_task(void *param) {
 static void ble_do_init(void) {
     int rc;
 
-    // ★ ОТЛАДКА: Убедимся, что NVS работает!
-    nvs_handle_t handle;
-    rc = nvs_open("nimble_bond", NVS_READONLY, &handle);
-    if (rc == ESP_OK) {
-        ESP_LOGI(TAG, "✅ NVS хранилище NimBLE доступно (ключи будут жить во Flash)");
-        nvs_close(handle);
-    } else {
-        ESP_LOGW(TAG, "❌ ВНИМАНИЕ! NVS хранилище NimBLE НЕ НАЙДЕНО! Ключи будут теряться при перезагрузке!");
-    }
+    
 
     ble_initialized = true;
     ble_running = true; // Помечаем сразу, чтобы settings_tile знал
@@ -4495,6 +4483,28 @@ static void ble_do_init(void) {
     ble_store_config_init();
 
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Попробуем записать и прочитать тестовый ключ
+    ESP_LOGI(TAG, "Тест записи в BLE store...");
+    struct ble_store_value_sec test_sec;
+    memset(&test_sec, 0, sizeof(test_sec));
+    test_sec.peer_addr.type = BLE_ADDR_PUBLIC;
+    memcpy(test_sec.peer_addr.val, "\x01\x02\x03\x04\x05\x06", 6);
+    test_sec.ltk_present = 1;
+    
+    int rc_write = ble_store_write_peer_sec(&test_sec);
+    ESP_LOGI(TAG, "  write rc=%d", rc_write);
+    
+    struct ble_store_key_sec key_sec;
+    memset(&key_sec, 0, sizeof(key_sec));
+    key_sec.peer_addr = test_sec.peer_addr;
+    
+    struct ble_store_value_sec read_sec;
+    int rc_read = ble_store_read_peer_sec(&key_sec, &read_sec);
+    ESP_LOGI(TAG, "  read rc=%d (0=OK)", rc_read);
+    
+    // Удаляем тестовый ключ
+    ble_store_util_delete_peer(&test_sec.peer_addr);
 
     // Опционально: проверить, что ключи действительно загружены
     //int peer_count = ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, NULL);
@@ -4667,9 +4677,9 @@ idf_component_register(
         bt 
         app_core 
         nvs_flash
-        #svc_vibro
+        svc_vibro
         ui
-        #svc_screen_sleep
+        svc_screen_sleep
         json
 )
 ===== ./ui_pairing_popup/ui_pairing_popup.c =====
@@ -5234,6 +5244,8 @@ void screen_home_logic_init(void);
 
 #include "ui.h"
 
+LV_FONT_DECLARE(lv_font_montserrat_14_cyrillic) 
+
 lv_obj_t * ui_ScreenHome = NULL;
 lv_obj_t * ui_Label1 = NULL;
 lv_obj_t * ui_Label2 = NULL;
@@ -5283,7 +5295,7 @@ void ui_ScreenHome_screen_init(void)
     lv_label_set_text(ui_Label1, "WeekDay");
     lv_obj_set_style_text_color(ui_Label1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_Label1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_36, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_14_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label2 = lv_label_create(ui_ScreenHome);
     lv_obj_set_width(ui_Label2, LV_SIZE_CONTENT);   /// 1
@@ -5294,7 +5306,7 @@ void ui_ScreenHome_screen_init(void)
     lv_label_set_text(ui_Label2, "MounthDay");
     lv_obj_set_style_text_color(ui_Label2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_Label2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_14_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label5 = lv_label_create(ui_ScreenHome);
     lv_obj_set_width(ui_Label5, LV_SIZE_CONTENT);   /// 1
@@ -5335,7 +5347,7 @@ void ui_ScreenHome_screen_init(void)
     lv_obj_set_x(ui_Label3, 102);
     lv_obj_set_y(ui_Label3, -196);
     lv_obj_set_align(ui_Label3, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label3, "100%\n4.16V");
+    lv_label_set_text(ui_Label3, "---%\n----V");
     lv_obj_set_style_text_color(ui_Label3, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_Label3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_Label3, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -5801,6 +5813,7 @@ void svc_auto_brightness_stop(void) {
 
 int svc_auto_brightness_get_current(void) {
     int val = 20;
+    if (state_mutex == NULL) return -1;
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         val = current_brightness;
         xSemaphoreGive(state_mutex);
@@ -5829,6 +5842,7 @@ void svc_auto_brightness_resume(bool force_update) {
     ESP_LOGI(TAG, "▶️ Auto-brightness RESUMED (screen awake)");
 
     if (force_update && auto_enabled) {
+        if (state_mutex == NULL) return;
         // Сразу применяем текущую рассчитанную яркость
         int brightness = 0;
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -5903,19 +5917,14 @@ idf_component_register(
 )
 ===== ./drv_phtrz/drv_phtrz.c =====
 #include "drv_phtrz.h"
-#include "esp_adc/adc_oneshot.h"
+#include "adc_shared.h" 
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 
-// На официальной плате Waveshare ESP32-S3-Touch-AMOLED-1.64 встроенного
-// фоторезистора нет (канал 3 в их demo - это системное/аккумуляторное
-// напряжение, см. drv_battery.c). Датчик освещённости - ваш собственный,
-// внешний, так что канал ниже - ЗАГЛУШКА. Поменяйте на тот, к которому
-// реально припаян фоторезистор на вашей плате (любой свободный ADC1-канал,
-// кроме занятого батареей CHANNEL_3).
+
 #define PHTRZ_ADC_UNIT     ADC_UNIT_1
-#define PHTRZ_ADC_CHANNEL  ADC_CHANNEL_2  // TODO: проверьте под свою распайку
+#define PHTRZ_ADC_CHANNEL  ADC_CHANNEL_7
 #define PHTRZ_ADC_ATTEN    ADC_ATTEN_DB_12
 #define PHTRZ_ADC_BITWIDTH ADC_BITWIDTH_12
 
@@ -5933,8 +5942,12 @@ void drv_phtrz_init(void)
         return;
     }
 
-    adc_oneshot_unit_init_cfg_t init_config = { .unit_id = PHTRZ_ADC_UNIT };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &s_adc_handle));
+    // ★ Берём общий handle
+    s_adc_handle = adc_shared_get_handle();
+    if (s_adc_handle == NULL) {
+        ESP_LOGE(TAG, "ADC1 not available");
+        return;
+    }
 
     adc_oneshot_chan_cfg_t chan_config = {
         .bitwidth = PHTRZ_ADC_BITWIDTH,
@@ -5949,9 +5962,6 @@ void drv_phtrz_init(void)
         .bitwidth = PHTRZ_ADC_BITWIDTH,
     };
     s_calibrated = (adc_cali_create_scheme_curve_fitting(&cali_config, &s_cali_handle) == ESP_OK);
-    if (!s_calibrated) {
-        ESP_LOGW(TAG, "ADC calibration недоступна, используем сырые отсчёты");
-    }
 
     s_initialized = true;
     ESP_LOGI(TAG, "Photoresistor ADC initialized on channel %d", PHTRZ_ADC_CHANNEL);
@@ -5978,6 +5988,7 @@ bool drv_phtrz_get_data(int *value)
     // Без множителя x3 (в отличие от батареи) - svc_auto_brightness калиброван
     // именно под сырое напряжение в мВ (BRIGHTNESS_LOW_VALUE=300,
     // BRIGHTNESS_HIGH_VALUE=1700 - это диапазон мВ, не вольт).
+    ESP_LOGI(TAG, "raw=%d, voltage=%d mV", adc_raw, mv);
     *value = mv;
     return true;
 }
@@ -5998,6 +6009,7 @@ idf_component_register(
     REQUIRES
         esp_adc
         log
+        adc_shared
 )
 
 ===== ./i2c_bsp/i2c_bsp.c =====
@@ -6080,13 +6092,14 @@ idf_component_register(
 
 static const char *TAG = "SCREEN_AOD";
 
-static lv_obj_t *s_prev_screen = NULL;      // экран, который был активен до входа в AOD
-static lv_timer_t *s_tick_timer = NULL;     // тикает раз в секунду, только пока AOD на экране
+// Центр экрана — ЕДИНАЯ точка отсчёта
+#define CX  (EXAMPLE_LCD_H_RES / 2)
+#define CY  (EXAMPLE_LCD_V_RES / 2)
+
+static lv_obj_t *s_prev_screen = NULL;
+static lv_timer_t *s_tick_timer = NULL;
 static bool s_in_aod = false;
 
-// =========================================================
-// ОБНОВЛЕНИЕ СТРЕЛОК
-// =========================================================
 static void aod_update_hands(void)
 {
     time_t now;
@@ -6094,22 +6107,23 @@ static void aod_update_hands(void)
     time(&now);
     localtime_r(&now, &tm_now);
 
-    int hour = tm_now.tm_hour % 12;
+    int hour   = tm_now.tm_hour % 12;
     int minute = tm_now.tm_min;
     int second = tm_now.tm_sec;
 
-    float hour_deg   = (hour + minute / 60.0f) * 30.0f;      // 360/12
-    float minute_deg = (minute + second / 60.0f) * 6.0f;     // 360/60
-    float second_deg = second * 6.0f;                        // 360/60
+    float hour_deg   = (hour + minute / 60.0f) * 30.0f;
+    float minute_deg = (minute + second / 60.0f) * 6.0f;
+    float second_deg = second * 6.0f;
 
-    lv_obj_set_style_transform_rotation(ui_AodHourHand, (int32_t)(hour_deg * 10), LV_PART_MAIN);
+    // Вращение стрелок (pivot уже в CX, CY)
+    lv_obj_set_style_transform_rotation(ui_AodHourHand,   (int32_t)(hour_deg * 10),   LV_PART_MAIN);
     lv_obj_set_style_transform_rotation(ui_AodMinuteHand, (int32_t)(minute_deg * 10), LV_PART_MAIN);
 
+    // ★ Секундный кружок: абсолютная позиция через lv_obj_set_pos
     float rad = second_deg * (float)M_PI / 180.0f;
-    int32_t dot_x = (int32_t)(AOD_SECOND_TRACK_R * sinf(rad));
-    int32_t dot_y = (int32_t)(-AOD_SECOND_TRACK_R * cosf(rad));
-    lv_obj_set_x(ui_AodSecondDot, dot_x);
-    lv_obj_set_y(ui_AodSecondDot, dot_y);
+    int32_t dot_x = CX + (int32_t)(AOD_SECOND_TRACK_R * sinf(rad)) - AOD_SECOND_DOT_SIZE / 2;
+    int32_t dot_y = CY - (int32_t)(AOD_SECOND_TRACK_R * cosf(rad)) - AOD_SECOND_DOT_SIZE / 2;
+    lv_obj_set_pos(ui_AodSecondDot, dot_x, dot_y);
 }
 
 static void aod_tick_timer_cb(lv_timer_t *timer)
@@ -6118,28 +6132,20 @@ static void aod_tick_timer_cb(lv_timer_t *timer)
     aod_update_hands();
 }
 
-// =========================================================
-// ВХОД / ВЫХОД ИЗ AOD
-// =========================================================
 void screen_aod_enter(void)
 {
     if (s_in_aod) return;
 
     s_prev_screen = lv_screen_active();
-    if (s_prev_screen == ui_ScreenAOD) {
-        s_prev_screen = ui_ScreenHome; // подстраховка от рекурсии
-    }
+    if (s_prev_screen == ui_ScreenAOD) s_prev_screen = ui_ScreenHome;
 
-    if (ui_ScreenAOD == NULL) {
-        ui_ScreenAOD_screen_init();
-    }
+    if (ui_ScreenAOD == NULL) ui_ScreenAOD_screen_init();
 
-    aod_update_hands(); // отрисовать актуальное время сразу, без ожидания тика
+    aod_update_hands();
     lv_screen_load_anim(ui_ScreenAOD, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
 
-    if (s_tick_timer == NULL) {
+    if (s_tick_timer == NULL)
         s_tick_timer = lv_timer_create(aod_tick_timer_cb, 1000, NULL);
-    }
 
     s_in_aod = true;
     ESP_LOGI(TAG, "Entered AOD watchface");
@@ -6155,18 +6161,14 @@ void screen_aod_exit(void)
     }
 
     lv_obj_t *target = (s_prev_screen != NULL) ? s_prev_screen : ui_ScreenHome;
-    if (target == ui_ScreenHome && ui_ScreenHome == NULL) {
+    if (target == ui_ScreenHome && ui_ScreenHome == NULL)
         ui_ScreenHome_screen_init();
-    }
     lv_screen_load_anim(target, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
 
     s_in_aod = false;
     ESP_LOGI(TAG, "Exited AOD watchface");
 }
 
-// =========================================================
-// СОБЫТИЯ ЗАПЯСТЬЯ (та же логика, что раньше дергала screen-sleep)
-// =========================================================
 static void wrist_sleep_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)arg; (void)base; (void)id; (void)event_data;
@@ -6185,12 +6187,7 @@ void screen_aod_logic_init(void)
     esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL, NULL);
     ESP_LOGI(TAG, "AOD logic initialized");
 }
-
 ===== ./screen_aod/ui_ScreenAOD.h =====
-// Hand-written screen (SquareLine Studio can't build custom-drawn watchfaces),
-// kept in the same style/location as the generated ui_ScreenX.h files so that
-// ui.h can aggregate it like any other screen.
-
 #ifndef UI_SCREENAOD_H
 #define UI_SCREENAOD_H
 
@@ -6198,39 +6195,32 @@ void screen_aod_logic_init(void)
 extern "C" {
 #endif
 
-// SCREEN: ui_ScreenAOD
 extern void ui_ScreenAOD_screen_init(void);
 extern void ui_ScreenAOD_screen_destroy(void);
 extern void ui_ScreenAOD_full_init(void);
 extern void ui_event_ScreenAOD(lv_event_t * e);
-extern lv_obj_t * ui_ScreenAOD;
 
-// CUSTOM VARIABLES (используются в screen_aod_logic.c для обновления стрелок)
+extern lv_obj_t * ui_ScreenAOD;
 extern lv_obj_t * ui_AodHourHand;
 extern lv_obj_t * ui_AodMinuteHand;
 extern lv_obj_t * ui_AodSecondDot;
 extern lv_obj_t * ui_AodRing;
 
-// Геометрия, нужна и в ui_ScreenAOD.c (построение), и в screen_aod_logic.c (обновление)
-#define AOD_HAND_WIDTH         5    // толщина стрелок = диаметр секундной точки
-#define AOD_HOUR_HAND_LEN     58    // длина часовой стрелки (короче)
-#define AOD_MINUTE_HAND_LEN   92    // длина минутной стрелки (длиннее)
-#define AOD_SECOND_TRACK_R   100    // радиус окружности, по которой бегает точка секунд
+#define AOD_HAND_WIDTH        20
+#define AOD_HOUR_HAND_LEN     58
+#define AOD_MINUTE_HAND_LEN   92
+#define AOD_SECOND_TRACK_R    90
+#define AOD_SECOND_DOT_SIZE   20
+
+#define EXAMPLE_LCD_H_RES           280
+#define EXAMPLE_LCD_V_RES           456
 
 #ifdef __cplusplus
-} /*extern "C"*/
+}
 #endif
 
 #endif
-
 ===== ./screen_aod/ui_ScreenAOD.c =====
-// Hand-written screen (не из SquareLine Studio): AOD-циферблат для AMOLED.
-// Волнистая линия огибает циферблат по кругу, волны там, где были бы цифры
-// (12 "горбов" на 12 часовых позиций), самих цифр нет.
-// Часовая и минутная стрелки - линии с закруглёнными концами (часовая короче
-// и ярче). Секундная стрелка - кружок того же диаметра, что и толщина
-// стрелок, цветом как часовая, бегущий по внешней окружности.
-
 #include "ui.h"
 #include <math.h>
 
@@ -6241,31 +6231,39 @@ lv_obj_t * ui_AodMinuteHand = NULL;
 lv_obj_t * ui_AodSecondDot = NULL;
 
 // =========================================================
-// ГЕОМЕТРИЯ ЦИФЕРБЛАТА
-// Подгоните AOD_FACE_RADIUS под реальное разрешение вашего AMOLED-экрана.
+// ГЕОМЕТРИЯ КОЛЬЦА
 // =========================================================
-#define AOD_FACE_RADIUS       130   // радиус лицевой стороны часов, px
-#define AOD_RING_RADIUS       118   // базовый радиус волнистой линии
-#define AOD_RING_WAVE_AMP     7     // амплитуда волны, px
-#define AOD_RING_BUMPS        12    // число "горбов" волны = число часовых меток
-#define AOD_RING_POINTS       240   // точек на всю окружность (сглаженность)
-#define AOD_RING_WIDTH        2     // толщина волнистой линии
-// AOD_HAND_WIDTH / AOD_HOUR_HAND_LEN / AOD_MINUTE_HAND_LEN / AOD_SECOND_TRACK_R
-// объявлены в ui_ScreenAOD.h - они нужны и здесь, и в screen_aod_logic.c
+#define AOD_RING_RADIUS       120
+#define AOD_RING_WAVE_AMP     6
+#define AOD_RING_BUMPS        12
+#define AOD_RING_POINTS       360
+#define AOD_RING_WIDTH        4
 
-#define AOD_COLOR_RING      UI_COLOR_BORDER    // тусклый, чтобы не жечь лишние субпиксели AMOLED
-#define AOD_COLOR_MINUTE    UI_COLOR_ACCENT_DIM // минутная - приглушённый акцент
-#define AOD_COLOR_HOUR      UI_COLOR_ACCENT     // часовая - полный акцент, ярче
-#define AOD_COLOR_SECOND    UI_COLOR_ACCENT     // точка секунд = цвет часовой стрелки
+// ★ Фазовый сдвиг: горб волны на позиции "1 час" (30°)
+#define AOD_RING_PHASE        ((float)M_PI / 6.0f)   // 30° в радианах
+
+// Offset для положительных координат
+#define AOD_RING_OFFSET  (AOD_RING_RADIUS + AOD_RING_WAVE_AMP + AOD_RING_WIDTH)
+
+// =========================================================
+// ЦВЕТА — БЕЗ swap (панель RGB, остальные цвета в проекте работают)
+// =========================================================
+#define AOD_COLOR_HOUR        0xD0BCFF  // rgb(208, 188, 255)
+#define AOD_COLOR_MINUTE      0x9F91BF  // rgb(159, 145, 191)
+#define AOD_COLOR_RING        0x4A3F6B  // тёмный лавандовый
+#define AOD_COLOR_SECOND      0xD0BCFF  // = часовая
+
+// =========================================================
+// ЦЕНТР ЭКРАНА (единая точка отсчёта для ВСЕХ объектов)
+// =========================================================
+#define CX  (EXAMPLE_LCD_H_RES / 2)   // 140
+#define CY  (EXAMPLE_LCD_V_RES / 2)   // 228
 
 static lv_point_precise_t ring_points[AOD_RING_POINTS + 1];
 
-// event funtions
 void ui_event_ScreenAOD(lv_event_t * e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
-
-    // Любое касание экрана в режиме AOD будит часы и возвращает на Home.
     if (event_code == LV_EVENT_CLICKED || event_code == LV_EVENT_GESTURE) {
         if (event_code == LV_EVENT_GESTURE) {
             lv_indev_wait_release(lv_indev_active());
@@ -6276,17 +6274,46 @@ void ui_event_ScreenAOD(lv_event_t * e)
     }
 }
 
-// build funtions
-
+// =========================================================
+// КОЛЬЦО: горб на "1 час", все точки ≥ 0
+// =========================================================
 static void build_ring_points(void)
 {
     for (int i = 0; i <= AOD_RING_POINTS; i++) {
         float theta = (2.0f * (float)M_PI) * (float)i / (float)AOD_RING_POINTS;
-        float wave = AOD_RING_WAVE_AMP * sinf(theta * AOD_RING_BUMPS);
+        // ★ cos((theta - PHASE) * BUMPS): максимум при theta = PHASE = 30° (1 час)
+        float wave = AOD_RING_WAVE_AMP * cosf((theta - AOD_RING_PHASE) * AOD_RING_BUMPS);
         float r = AOD_RING_RADIUS + wave;
-        ring_points[i].x = (lv_value_precise_t)(r * sinf(theta));
-        ring_points[i].y = (lv_value_precise_t)(-r * cosf(theta));
+        ring_points[i].x = (lv_value_precise_t)(r * sinf(theta) + AOD_RING_OFFSET);
+        ring_points[i].y = (lv_value_precise_t)(-r * cosf(theta) + AOD_RING_OFFSET);
     }
+}
+
+// =========================================================
+// СТРЕЛКА: позиционирование через lv_obj_set_pos (абсолютные координаты)
+// Pivot на (width/2, len - width/2) → нахлёст за центр на РАДИУС стрелки
+// =========================================================
+static lv_obj_t * create_hand(lv_obj_t * parent, int w, int len, uint32_t color)
+{
+    lv_obj_t * hand = lv_obj_create(parent);
+    lv_obj_remove_style_all(hand);
+    lv_obj_set_size(hand, w, len);
+
+    // ★ Абсолютная позиция: pivot должен быть в (CX, CY)
+    // pivot_local = (w/2, len - w/2)
+    // top_left = pivot_screen - pivot_local = (CX - w/2, CY - len + w/2)
+    lv_obj_set_pos(hand, CX - w / 2, CY - len + w / 2);
+
+    lv_obj_set_style_radius(hand, w / 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hand, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(hand, LV_OPA_COVER, LV_PART_MAIN);
+
+    // ★ Pivot: нахлёст на РАДИУС (w/2) от нижнего края
+    lv_obj_set_style_transform_pivot_x(hand, w / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(hand, len - w / 2, LV_PART_MAIN);
+
+    lv_obj_remove_flag(hand, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return hand;
 }
 
 void ui_ScreenAOD_screen_init(void)
@@ -6296,53 +6323,38 @@ void ui_ScreenAOD_screen_init(void)
     lv_obj_set_style_bg_color(ui_ScreenAOD, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ScreenAOD, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(ui_ScreenAOD, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_pad_all(ui_ScreenAOD, 0, LV_PART_MAIN);
 
-    // --- Волнистое кольцо вместо цифр ---
+    // ─── Кольцо ───
     build_ring_points();
     ui_AodRing = lv_line_create(ui_ScreenAOD);
+    lv_obj_remove_style_all(ui_AodRing);
     lv_line_set_points(ui_AodRing, ring_points, AOD_RING_POINTS + 1);
-    lv_obj_set_align(ui_AodRing, LV_ALIGN_CENTER);
     lv_obj_set_style_line_width(ui_AodRing, AOD_RING_WIDTH, LV_PART_MAIN);
     lv_obj_set_style_line_color(ui_AodRing, lv_color_hex(AOD_COLOR_RING), LV_PART_MAIN);
     lv_obj_set_style_line_rounded(ui_AodRing, true, LV_PART_MAIN);
     lv_obj_set_style_line_opa(ui_AodRing, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(ui_AodRing, 0, LV_PART_MAIN);
     lv_obj_remove_flag(ui_AodRing, LV_OBJ_FLAG_CLICKABLE);
+    // ★ Позиция: центр кольца (OFFSET, OFFSET) → в (CX, CY)
+    lv_obj_set_pos(ui_AodRing, CX - AOD_RING_OFFSET, CY - AOD_RING_OFFSET);
 
-    // --- Минутная стрелка (длиннее, тусклее) ---
-    ui_AodMinuteHand = lv_obj_create(ui_ScreenAOD);
-    lv_obj_remove_style_all(ui_AodMinuteHand);
-    lv_obj_set_size(ui_AodMinuteHand, AOD_HAND_WIDTH, AOD_MINUTE_HAND_LEN);
-    lv_obj_set_align(ui_AodMinuteHand, LV_ALIGN_CENTER);
-    lv_obj_set_y(ui_AodMinuteHand, -AOD_MINUTE_HAND_LEN / 2);
-    lv_obj_set_style_radius(ui_AodMinuteHand, AOD_HAND_WIDTH / 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ui_AodMinuteHand, lv_color_hex(AOD_COLOR_MINUTE), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(ui_AodMinuteHand, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_x(ui_AodMinuteHand, AOD_HAND_WIDTH / 2, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_y(ui_AodMinuteHand, AOD_MINUTE_HAND_LEN, LV_PART_MAIN);
-    lv_obj_remove_flag(ui_AodMinuteHand, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    // ─── Стрелки (pivot в CX, CY) ───
+    ui_AodMinuteHand = create_hand(ui_ScreenAOD, AOD_HAND_WIDTH, AOD_MINUTE_HAND_LEN, AOD_COLOR_MINUTE);
+    ui_AodHourHand   = create_hand(ui_ScreenAOD, AOD_HAND_WIDTH, AOD_HOUR_HAND_LEN,   AOD_COLOR_HOUR);
 
-    // --- Часовая стрелка (короче, ярче) ---
-    ui_AodHourHand = lv_obj_create(ui_ScreenAOD);
-    lv_obj_remove_style_all(ui_AodHourHand);
-    lv_obj_set_size(ui_AodHourHand, AOD_HAND_WIDTH, AOD_HOUR_HAND_LEN);
-    lv_obj_set_align(ui_AodHourHand, LV_ALIGN_CENTER);
-    lv_obj_set_y(ui_AodHourHand, -AOD_HOUR_HAND_LEN / 2);
-    lv_obj_set_style_radius(ui_AodHourHand, AOD_HAND_WIDTH / 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ui_AodHourHand, lv_color_hex(AOD_COLOR_HOUR), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(ui_AodHourHand, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_x(ui_AodHourHand, AOD_HAND_WIDTH / 2, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_y(ui_AodHourHand, AOD_HOUR_HAND_LEN, LV_PART_MAIN);
-    lv_obj_remove_flag(ui_AodHourHand, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-
-    // --- Секундная стрелка = кружок, диаметр = толщина стрелок, цвет как у часовой ---
+    // ─── Секундный кружок (начальная позиция — 12 часов) ───
     ui_AodSecondDot = lv_obj_create(ui_ScreenAOD);
     lv_obj_remove_style_all(ui_AodSecondDot);
-    lv_obj_set_size(ui_AodSecondDot, AOD_HAND_WIDTH, AOD_HAND_WIDTH);
+    lv_obj_set_size(ui_AodSecondDot, AOD_SECOND_DOT_SIZE, AOD_SECOND_DOT_SIZE);
     lv_obj_set_style_radius(ui_AodSecondDot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_bg_color(ui_AodSecondDot, lv_color_hex(AOD_COLOR_SECOND), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui_AodSecondDot, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_align(ui_AodSecondDot, LV_ALIGN_CENTER);
     lv_obj_remove_flag(ui_AodSecondDot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    // Начальная позиция (12 часов): центр кружка в (CX, CY - TRACK_R)
+    lv_obj_set_pos(ui_AodSecondDot,
+                   CX - AOD_SECOND_DOT_SIZE / 2,
+                   CY - AOD_SECOND_TRACK_R - AOD_SECOND_DOT_SIZE / 2);
 
     lv_obj_add_event_cb(ui_ScreenAOD, ui_event_ScreenAOD, LV_EVENT_ALL, NULL);
 }
@@ -6350,14 +6362,12 @@ void ui_ScreenAOD_screen_init(void)
 void ui_ScreenAOD_screen_destroy(void)
 {
     if (ui_ScreenAOD) lv_obj_del(ui_ScreenAOD);
-
     ui_ScreenAOD = NULL;
     ui_AodRing = NULL;
     ui_AodHourHand = NULL;
     ui_AodMinuteHand = NULL;
     ui_AodSecondDot = NULL;
 }
-
 ===== ./screen_aod/screen_aod_logic.h =====
 #pragma once
 
@@ -6394,6 +6404,40 @@ idf_component_register(
         svc_screen_sleep
 )
 
+===== ./adc_shared/adc_shared.c =====
+#include "adc_shared.h"
+#include "esp_log.h"
+
+static const char *TAG = "ADC_SHARED";
+static adc_oneshot_unit_handle_t s_handle = NULL;
+
+adc_oneshot_unit_handle_t adc_shared_get_handle(void)
+{
+    if (s_handle != NULL) return s_handle;
+
+    adc_oneshot_unit_init_cfg_t cfg = { .unit_id = ADC_UNIT_1 };
+    esp_err_t err = adc_oneshot_new_unit(&cfg, &s_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "adc_oneshot_new_unit failed: %s", esp_err_to_name(err));
+        return NULL;
+    }
+    ESP_LOGI(TAG, "ADC1 unit created");
+    return s_handle;
+}
+===== ./adc_shared/adc_shared.h =====
+#pragma once
+#include "esp_adc/adc_oneshot.h"
+#include <stdbool.h>
+
+// Инициализировать ADC1 один раз (повторные вызовы безопасны).
+// Возвращает handle или NULL при ошибке.
+adc_oneshot_unit_handle_t adc_shared_get_handle(void);
+===== ./adc_shared/CMakeLists.txt =====
+idf_component_register(
+    SRCS "adc_shared.c"
+    INCLUDE_DIRS "."
+    REQUIRES esp_adc log
+)
 ===== ./svc_vibro/svc_vibro.c =====
 #include "svc_vibro.h"
 #include "drv_vibro.h"
@@ -6649,7 +6693,7 @@ idf_component_register(
 )
 ===== ./drv_battery/drv_battery.c =====
 #include "drv_battery.h"
-#include "esp_adc/adc_oneshot.h"
+#include "adc_shared.h"  
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
@@ -6697,15 +6741,21 @@ void drv_battery_init(void)
         return;
     }
 
-    adc_oneshot_unit_init_cfg_t init_config = { .unit_id = BATTERY_ADC_UNIT };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &s_adc_handle));
+    // ★ Берём общий handle вместо adc_oneshot_new_unit()
+    s_adc_handle = adc_shared_get_handle();
+    if (s_adc_handle == NULL) {
+        ESP_LOGE(TAG, "ADC1 not available");
+        return;
+    }
 
+    // Конфигурируем ТОЛЬКО свой канал
     adc_oneshot_chan_cfg_t chan_config = {
         .bitwidth = BATTERY_ADC_BITWIDTH,
         .atten = BATTERY_ADC_ATTEN,
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, BATTERY_ADC_CHANNEL, &chan_config));
 
+    // Калибровка (без изменений)
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = BATTERY_ADC_UNIT,
         .chan = BATTERY_ADC_CHANNEL,
@@ -6714,7 +6764,7 @@ void drv_battery_init(void)
     };
     s_calibrated = (adc_cali_create_scheme_curve_fitting(&cali_config, &s_cali_handle) == ESP_OK);
     if (!s_calibrated) {
-        ESP_LOGW(TAG, "ADC calibration недоступна (eFuse не прошит?), точность будет ниже");
+        ESP_LOGW(TAG, "ADC calibration unavailable");
     }
 
     s_initialized = true;
@@ -6789,6 +6839,7 @@ idf_component_register(
     REQUIRES
         esp_adc
         log
+        adc_shared
 )
 
 ===== ./screen_phone/screen_phone_logic.c =====
@@ -7725,23 +7776,13 @@ idf_component_register(
 ===== ./drv_vibro/drv_vibro.h =====
 /**
  * @file drv_vibro.h
- * @brief Драйвер вибромотора для Waveshare ESP32-S3-1.47
- *
- * ГЛАВОЕ ПРАВИЛО: Используем отдельный LEDC таймер от подсветки!
- * Backlight обычно занимает LEDC_TIMER_0 → мы берём LEDC_TIMER_1
+ * @brief Драйвер вибромотора 
  */
 
 #pragma once
 #include <stdbool.h>
 #include <stdio.h>
 
-/* ============================================================
- *  КОНФИГУРАЦИЯ PWM
- *
- * Waveshare ESP32-S3-1.47 назначение LEDC:
- *   - LEDC_TIMER_0 + CHANNEL_x → Подсветка дисплея (BSP)
- *   - LEDC_TIMER_1 + CHANNEL_0 → ВИБРОМОТОР (мы) ← ИЗБЕГАЕМ КОНФЛИКТА!
- * ============================================================ */
 
 // ✅ ИСПРАВЛЕНО: Таймер 1 вместо 0!
 #define VIB_LEDC_TIMER LEDC_TIMER_1 // Был TIMER_0 → теперь TIMER_1
@@ -7753,7 +7794,7 @@ idf_component_register(
 
 #define VIB_LEDC_FREQUENCY 200 // Hz (для ERM/LRA моторов)
 
-#define PIN_VIBRO 5
+#define PIN_VIBRO 18
 
 /* ============================================================
  *  API

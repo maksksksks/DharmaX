@@ -207,6 +207,7 @@ void svc_auto_brightness_stop(void) {
 
 int svc_auto_brightness_get_current(void) {
     int val = 20;
+    if (state_mutex == NULL) return -1;
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         val = current_brightness;
         xSemaphoreGive(state_mutex);
@@ -235,6 +236,7 @@ void svc_auto_brightness_resume(bool force_update) {
     ESP_LOGI(TAG, "▶️ Auto-brightness RESUMED (screen awake)");
 
     if (force_update && auto_enabled) {
+        if (state_mutex == NULL) return;
         // Сразу применяем текущую рассчитанную яркость
         int brightness = 0;
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {

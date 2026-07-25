@@ -19,6 +19,7 @@
 #include "i2c_bsp.h"
 #include "touch_bsp.h"
 #include "ui.h"
+#include "nvs_flash.h"
 
 #include "app_events.h"
 #include "svc_ble_sync.h"
@@ -29,6 +30,10 @@
 #include "svc_screen_sleep.h"
 #include "svc_vibro.h"
 #include "ui_pairing_popup.h"   // show_pairing_popup/close_pairing_popup_cb теперь тут
+#include "drv_battery.h"
+#include "svc_battery_monitor.h"
+#include "drv_phtrz.h"
+#include "svc_auto_brightness.h"
 
 static const char *TAG = "main";
 static SemaphoreHandle_t lvgl_mux = NULL;
@@ -203,8 +208,15 @@ static void app_event_handler(void* handler_args, esp_event_base_t base, int32_t
 // ═══════════════════════════════════════════════════════
 // ГЛАВНАЯ ФУНКЦИЯ
 // ═══════════════════════════════════════════════════════
-void app_main(void)
-{
+void app_main(void) {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGE(TAG, "⚠️ NVS ПОВРЕЖДЁН ИЛИ НОВАЯ ВЕРСИЯ! ret=%s — СТИРАЮ ВСЁ!", esp_err_to_name(ret));
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
     esp_err_t err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(err));
@@ -308,8 +320,11 @@ void app_main(void)
     // Сервисы, не зависящие от LVGL (можно поднимать до/после экрана)
     // ═══════════════════════════════════════════════════════
     svc_vibro_init();
-    svc_screen_sleep_init(); // ★ требует, чтобы bsp_display_backlight_attach() уже был вызван (см. выше)
-
+    drv_phtrz_init();               // ← фотодатчик (нужен авто-яркости)
+    svc_auto_brightness_start();    // ← ДОБАВИТЬ — создаёт state_mutex
+    svc_screen_sleep_init();        // ← этот может дёрнуть resume при первом касании
+    drv_battery_init();          // ADC для батареи
+    svc_battery_monitor_start();
     // ═══════════════════════════════════════════════════════
     // Запуск UI (под мьютексом!)
     // ═══════════════════════════════════════════════════════

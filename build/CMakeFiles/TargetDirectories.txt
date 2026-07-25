@@ -902,6 +902,13 @@
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/bsp_display/CMakeFiles/install.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/bsp_display/CMakeFiles/install/local.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/bsp_display/CMakeFiles/install/strip.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/__idf_adc_shared.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/edit_cache.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/rebuild_cache.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/list_install_components.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/install.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/install/local.dir
+/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/adc_shared/CMakeFiles/install/strip.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/CMakeFiles/__idf_drv_phtrz.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/CMakeFiles/edit_cache.dir
 /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/drv_phtrz/CMakeFiles/rebuild_cache.dir
