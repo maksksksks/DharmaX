@@ -40,11 +40,17 @@ static lv_obj_t *make_roller(lv_obj_t *parent, int max_exclusive)
     lv_obj_t *roller = lv_roller_create(parent);
     lv_roller_set_options(roller, opts, LV_ROLLER_MODE_INFINITE);
     lv_roller_set_visible_row_count(roller, 3);
-    lv_obj_set_width(roller, 70);
-    lv_obj_set_style_bg_color(roller, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
-    lv_obj_set_style_text_color(roller, lv_color_hex(UI_COLOR_TEXT_SECONDARY), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(roller, lv_color_hex(UI_COLOR_ACCENT), LV_PART_SELECTED);
-    lv_obj_set_style_text_color(roller, lv_color_hex(0x000000), LV_PART_SELECTED);
+    lv_obj_set_width(roller, 88);                                              // было 70
+
+    // Без сплошной заливки — как системный picker на телефоне
+    lv_obj_set_style_bg_opa(roller, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_text_font(roller, &lv_font_montserrat_30, LV_PART_MAIN);   // было дефолтный (14)
+    lv_obj_set_style_text_color(roller, lv_color_hex(UI_COLOR_TEXT_DISABLED), LV_PART_MAIN);
+
+    lv_obj_set_style_bg_opa(roller, LV_OPA_TRANSP, LV_PART_SELECTED);           // было UI_COLOR_ACCENT
+    lv_obj_set_style_text_color(roller, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_SELECTED);
+    lv_obj_set_style_text_font(roller, &lv_font_montserrat_30, LV_PART_SELECTED);
+
     return roller;
 }
 
@@ -90,8 +96,14 @@ static void timer_start_cb(lv_event_t *e)
     lv_obj_add_flag(timer_start_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(timer_cancel_btn, LV_OBJ_FLAG_HIDDEN);
 
-    timer_tick_cb(NULL); // сразу показать стартовое значение без ожидания 1с
-    timer_remaining_sec++; // компенсируем немедленный decrement в первом тике таймера
+    // Показываем стартовое значение сразу, без немедленного decrement
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld",
+             (long)(timer_remaining_sec / 3600),
+             (long)((timer_remaining_sec / 60) % 60),
+             (long)(timer_remaining_sec % 60));
+    lv_label_set_text(timer_countdown_label, buf);
+
     timer_tick = lv_timer_create(timer_tick_cb, 1000, NULL);
 }
 
@@ -254,6 +266,7 @@ static void sw_right_btn_cb(lv_event_t *e)
     (void)e;
     switch (sw_state) {
     case SW_IDLE:
+        if (sw_tick) { lv_timer_del(sw_tick); sw_tick = NULL; }   // ← защита
         sw_state = SW_RUNNING;
         sw_start_us = esp_timer_get_time();
         sw_accumulated_us = 0;
@@ -270,6 +283,7 @@ static void sw_right_btn_cb(lv_event_t *e)
         sw_set_buttons_paused();
         break;
     case SW_PAUSED: // Resume
+        if (sw_tick) { lv_timer_del(sw_tick); sw_tick = NULL; }   // ← защита
         sw_state = SW_RUNNING;
         sw_start_us = esp_timer_get_time();
         sw_tick = lv_timer_create(sw_tick_cb, 50, NULL);
@@ -302,29 +316,29 @@ static void build_stopwatch_tab(void)
     sw_lbl_hhmm = lv_label_create(ui_TabPageStopwatch);
     lv_label_set_text(sw_lbl_hhmm, "00:00");
     lv_obj_set_align(sw_lbl_hhmm, LV_ALIGN_TOP_MID);
-    lv_obj_set_y(sw_lbl_hhmm, 30);
+    lv_obj_set_y(sw_lbl_hhmm, 40);
     lv_obj_set_style_text_color(sw_lbl_hhmm, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
-    lv_obj_set_style_text_font(sw_lbl_hhmm, &lv_font_montserrat_44, LV_PART_MAIN);
+    lv_obj_set_style_text_font(sw_lbl_hhmm, &lv_font_montserrat_48, LV_PART_MAIN);   // было _44
 
     sw_lbl_ssms = lv_label_create(ui_TabPageStopwatch);
     lv_label_set_text(sw_lbl_ssms, "00.000");
     lv_obj_set_align(sw_lbl_ssms, LV_ALIGN_TOP_MID);
-    lv_obj_set_y(sw_lbl_ssms, 82);
+    lv_obj_set_y(sw_lbl_ssms, 98);                                                   // было 82
     lv_obj_set_style_text_color(sw_lbl_ssms, lv_color_hex(UI_COLOR_ACCENT), LV_PART_MAIN);
-    lv_obj_set_style_text_font(sw_lbl_ssms, &lv_font_montserrat_30, LV_PART_MAIN);
+    lv_obj_set_style_text_font(sw_lbl_ssms, &lv_font_montserrat_44, LV_PART_MAIN);   // было _30
 
     sw_btn_left = make_action_btn(ui_TabPageStopwatch, "Lap", UI_COLOR_SURFACE_ALT, sw_left_btn_cb);
     lv_obj_set_align(sw_btn_left, LV_ALIGN_TOP_MID);
-    lv_obj_set_y(sw_btn_left, 150);
+    lv_obj_set_y(sw_btn_left, 170);                                                  // было 150
     lv_obj_set_x(sw_btn_left, -65);
 
     sw_btn_right = make_action_btn(ui_TabPageStopwatch, "Start", UI_COLOR_ACCENT, sw_right_btn_cb);
     lv_obj_set_align(sw_btn_right, LV_ALIGN_TOP_MID);
-    lv_obj_set_y(sw_btn_right, 150);
+    lv_obj_set_y(sw_btn_right, 170);                                                 // было 150
 
     sw_laps_list = lv_obj_create(ui_TabPageStopwatch);
     lv_obj_remove_style_all(sw_laps_list);
-    lv_obj_set_size(sw_laps_list, lv_pct(90), 150);
+    lv_obj_set_size(sw_laps_list, lv_pct(90), 130);                                  // было 150
     lv_obj_set_align(sw_laps_list, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_y(sw_laps_list, -10);
     lv_obj_set_flex_flow(sw_laps_list, LV_FLEX_FLOW_COLUMN);

@@ -320,11 +320,12 @@ void app_main(void) {
     // Сервисы, не зависящие от LVGL (можно поднимать до/после экрана)
     // ═══════════════════════════════════════════════════════
     svc_vibro_init();
-    drv_phtrz_init();               // ← фотодатчик (нужен авто-яркости)
-    svc_auto_brightness_start();    // ← ДОБАВИТЬ — создаёт state_mutex
+    //drv_phtrz_init();               // ← фотодатчик (нужен авто-яркости)
+    //svc_auto_brightness_start();    // ← ДОБАВИТЬ — создаёт state_mutex
     svc_screen_sleep_init();        // ← этот может дёрнуть resume при первом касании
     drv_battery_init();          // ADC для батареи
     svc_battery_monitor_start();
+    bsp_display_set_brightness(80); 
     // ═══════════════════════════════════════════════════════
     // Запуск UI (под мьютексом!)
     // ═══════════════════════════════════════════════════════

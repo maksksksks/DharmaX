@@ -20,6 +20,8 @@
 #define UI_COLOR_DANGER          0xFF6B6B  // удаление/ошибка/разряд батареи
 #define UI_COLOR_SUCCESS         0xB9F6CA  // подтверждение/ОК
 
+#define UI_COLOR_SURFACE_DIM     0x100D18  // притушенная поверхность - там, где UI_COLOR_SURFACE выглядит слишком светло на чёрном фоне
+
 // Утилита: применить "базовый" стиль экрана (чёрный фон) одной строкой.
 #define UI_APPLY_SCREEN_BG(obj) \
     do { \

@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/drv_phtrz
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/drv_phtrz
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

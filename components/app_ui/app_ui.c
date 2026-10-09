@@ -42,7 +42,7 @@ void app_ui_init(void)
     // screen_settings_logic_init();
     // screen_system_logic_init();
     // screen_weatherdetails_logic_init();
-    // screen_news_logic_init();
+    screen_news_logic_init();
     // screen_events_logic_init();
     // screen_sys_logic_init();
     // screen_ir_logic_init();

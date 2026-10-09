@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/svc_lighting_monitor
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/svc_lighting_monitor
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/svc_auto_brightness
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/svc_auto_brightness
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

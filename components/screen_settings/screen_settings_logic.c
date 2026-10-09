@@ -106,8 +106,8 @@ static void create_setting_row(const char *name, const char *desc, lv_event_cb_t
 {
     lv_obj_t *row = lv_obj_create(scroll_container);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), 64);
-    lv_obj_set_style_bg_color(row, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
+    lv_obj_set_size(row, lv_pct(100), 74);                              // было 64
+    lv_obj_set_style_bg_color(row, lv_color_hex(UI_COLOR_SURFACE_DIM), LV_PART_MAIN); // было UI_COLOR_SURFACE
     lv_obj_set_style_bg_opa(row, 255, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
     lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -116,24 +116,24 @@ static void create_setting_row(const char *name, const char *desc, lv_event_cb_t
     lv_label_set_text(lbl_name, name);
     lv_obj_set_pos(lbl_name, 14, 8);
     lv_obj_set_style_text_color(lbl_name, lv_color_hex(UI_COLOR_TEXT_PRIMARY), 0);
-    lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_20, 0);    // было montserrat_14
 
     lv_obj_t *lbl_desc = lv_label_create(row);
     lv_label_set_text(lbl_desc, desc);
-    lv_obj_set_pos(lbl_desc, 14, 30);
+    lv_obj_set_pos(lbl_desc, 14, 42);                                   // было y=30
     lv_obj_set_style_text_color(lbl_desc, lv_color_hex(UI_COLOR_TEXT_SECONDARY), 0);
     lv_obj_set_style_text_font(lbl_desc, &lv_font_montserrat_14, 0);
 
     lv_obj_t *sw = lv_switch_create(row);
     lv_obj_set_size(sw, 50, 26);
-    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -50, -8);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -50, -10);                     // было -8
     lv_obj_set_style_bg_color(sw, lv_color_hex(UI_COLOR_SURFACE_ALT), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, lv_color_hex(UI_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *lbl_status = lv_label_create(row);
     lv_label_set_text(lbl_status, "OFF");
-    lv_obj_align(lbl_status, LV_ALIGN_RIGHT_MID, -12, -8);
+    lv_obj_align(lbl_status, LV_ALIGN_RIGHT_MID, -12, -10);             // было -8
     lv_obj_set_style_text_font(lbl_status, &lv_font_montserrat_14, 0);
 
     *out_switch = sw;

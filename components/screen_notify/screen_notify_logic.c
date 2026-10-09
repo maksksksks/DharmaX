@@ -13,8 +13,8 @@ static card_feed_t s_feed;
 
 static void apply_theme(void)
 {
-    lv_obj_set_style_bg_opa(ui_TabView1, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(ui_Label8, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+    lv_obj_set_y(ui_Label8, -210); // поднимаем заголовок, освобождая место под ленту
 }
 
 void ui_ScreenNotify_full_init(void)
@@ -23,18 +23,12 @@ void ui_ScreenNotify_full_init(void)
     screen_notify_logic_init();
 }
 
-static void build_feed_tab(void)
+static void build_feed(void)
 {
-    // ui_TabView1 создаётся в ui_ScreenNotify.c, но пока имеет "черновые"
-    // размеры/позицию от SquareLine - расставляем их здесь программно.
-    lv_obj_set_size(ui_TabView1, lv_pct(100), lv_pct(85));
-    lv_obj_set_align(ui_TabView1, LV_ALIGN_BOTTOM_MID);
-    lv_obj_set_pos(ui_TabView1, 0, 0);
-
-    lv_obj_t *tab_feed = lv_tabview_add_tab(ui_TabView1, "Feed");
-    lv_obj_set_style_bg_opa(tab_feed, 0, LV_PART_MAIN);
-
-    s_feed = card_feed_create(tab_feed, 600000); // автоудаление через 10 минут
+    s_feed = card_feed_create(ui_ScreenNotify, 600000); // автоудаление через 10 минут
+    lv_obj_t *container = card_feed_get_container(s_feed);
+    lv_obj_set_size(container, lv_pct(100), lv_pct(78));
+    lv_obj_set_align(container, LV_ALIGN_BOTTOM_MID);
 }
 
 static void notify_to_card(const notify_data *n, card_feed_item_t *out, char *time_buf, size_t time_buf_sz)
@@ -71,7 +65,7 @@ static void ble_notify_event_handler(void *arg, esp_event_base_t base, int32_t i
 void screen_notify_logic_init(void)
 {
     apply_theme();
-    build_feed_tab();
+    build_feed();
 
     esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_RX, ble_notify_event_handler, NULL, NULL);
     esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_DEL, ble_notify_event_handler, NULL, NULL);

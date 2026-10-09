@@ -1,4 +1,4 @@
-/* * Data converted from /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/esp-idf/mbedtls/x509_crt_bundle
+/* * Data converted from /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/esp-idf/mbedtls/x509_crt_bundle
  */
 .data
 #if !defined (__APPLE__) && !defined (__linux__)

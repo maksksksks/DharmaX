@@ -318,7 +318,7 @@ rule C_STATIC_LIBRARY_LINKER____idf_main_
 # Rule for re-running cmake.
 
 rule RERUN_CMAKE
-  command = /home/neo/.espressif/tools/cmake/3.30.2/bin/cmake --regenerate-during-build -S/home/neo/esp/.espressif/v5.5.4/esp-idf/components/bootloader/subproject -B/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader
+  command = /home/neo/.espressif/tools/cmake/3.30.2/bin/cmake --regenerate-during-build -S/home/neo/esp/.espressif/v5.5.4/esp-idf/components/bootloader/subproject -B/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader
   description = Re-running CMake...
   generator = 1
 

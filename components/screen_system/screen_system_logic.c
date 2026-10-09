@@ -50,12 +50,12 @@ static lv_obj_t *make_info_row(lv_obj_t *parent, const char *label)
     lv_obj_t *lbl_key = lv_label_create(row);
     lv_label_set_text(lbl_key, label);
     lv_obj_set_style_text_color(lbl_key, lv_color_hex(UI_COLOR_TEXT_SECONDARY), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_14, LV_PART_MAIN);   // подписи оставляем мелкими
 
     lv_obj_t *lbl_val = lv_label_create(row);
     lv_label_set_text(lbl_val, "--");
     lv_obj_set_style_text_color(lbl_val, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, LV_PART_MAIN);   // было _14 — значения крупнее
 
     return lbl_val;
 }
@@ -68,18 +68,18 @@ static void build_ui(void)
 
     lv_obj_t *card = lv_obj_create(ui_ScreenSystem);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, lv_pct(85), 230);
+    lv_obj_set_size(card, lv_pct(85), 250);                                                    // было 230
     lv_obj_set_align(card, LV_ALIGN_CENTER);
     lv_obj_set_y(card, 10);
     lv_obj_set_style_radius(card, 14, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(card, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(card, lv_color_hex(UI_COLOR_SURFACE_DIM), LV_PART_MAIN);           // было UI_COLOR_SURFACE
     lv_obj_set_style_bg_opa(card, 255, LV_PART_MAIN);
     lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(card, lv_color_hex(UI_COLOR_BORDER), LV_PART_MAIN);
     lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(card, 14, LV_PART_MAIN);                                            // было 12
 
     lbl_chip = make_info_row(card, LV_SYMBOL_SD_CARD " Chip");
     lbl_flash = make_info_row(card, LV_SYMBOL_SAVE " Flash");

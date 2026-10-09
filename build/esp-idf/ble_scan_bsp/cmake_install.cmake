@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/ble_scan_bsp
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/ble_scan_bsp
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

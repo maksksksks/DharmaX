@@ -54,7 +54,7 @@ void svc_screen_sleep_force_sleep(void)
 
     screen_aod_enter();
     
-    bsp_display_set_brightness(20); 
+    bsp_display_set_brightness(80); 
 
     s_sleeping = true;
     svc_auto_brightness_suspend();

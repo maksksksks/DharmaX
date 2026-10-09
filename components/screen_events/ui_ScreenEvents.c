@@ -38,7 +38,7 @@ void ui_ScreenEvents_screen_init(void)
     lv_obj_set_style_text_opa(ui_Label18, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_Label18, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_add_event_cb(ui_Label18, ui_event_Label18, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_ScreenEvents, ui_event_Label18, LV_EVENT_ALL, NULL);
 
 }
 

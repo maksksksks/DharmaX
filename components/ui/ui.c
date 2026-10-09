@@ -41,7 +41,7 @@ void ui_init(void)
     // ui_ScreenSettings_screen_init();
     // ui_ScreenSystem_screen_init();
     // ui_ScreenWeatherDetails_screen_init();
-    // ui_ScreenNews_screen_init();
+    ui_ScreenNews_screen_init();
     // ui_ScreenEvents_screen_init();
     // ui_ScreenSys_screen_init();
     // ui_ScreenIR_screen_init();

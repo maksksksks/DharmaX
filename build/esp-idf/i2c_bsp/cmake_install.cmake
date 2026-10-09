@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/i2c_bsp
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/i2c_bsp
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

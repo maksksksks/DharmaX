@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 
+LV_FONT_DECLARE(lv_font_montserrat_26_cyrillic)
+
 #define SWIPE_START_THRESHOLD 10
 #define SWIPE_DELETE_THRESHOLD 80
 #define SWIPE_VELOCITY_THRESHOLD 5
@@ -165,19 +167,19 @@ void card_feed_add(card_feed_t feed, const card_feed_item_t *item)
 
     lv_obj_t *card = lv_obj_create(feed->container);
     lv_obj_remove_style_all(card);
-    lv_obj_set_width(card, lv_pct(92));
+    lv_obj_set_width(card, lv_pct(96));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_align(card, LV_ALIGN_TOP_MID);
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_set_style_radius(card, 10, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(card, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(card, lv_color_hex(UI_COLOR_SURFACE_DIM), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(card, 255, LV_PART_MAIN);
     lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(card, lv_color_hex(UI_COLOR_BORDER), LV_PART_MAIN);
-    lv_obj_set_style_pad_all(card, 10, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(card, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(card, 6, LV_PART_MAIN);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
@@ -193,13 +195,13 @@ void card_feed_add(card_feed_t feed, const card_feed_item_t *item)
             lv_obj_t *lbl = lv_label_create(row_top);
             lv_label_set_text(lbl, item->header_left);
             lv_obj_set_style_text_color(lbl, lv_color_hex(UI_COLOR_ACCENT), LV_PART_MAIN);
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26_cyrillic, 0);
         }
         if (item->header_right && item->header_right[0]) {
             lv_obj_t *lbl = lv_label_create(row_top);
             lv_label_set_text(lbl, item->header_right);
             lv_obj_set_style_text_color(lbl, lv_color_hex(UI_COLOR_TEXT_SECONDARY), LV_PART_MAIN);
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26_cyrillic, 0);
         }
     }
 
@@ -209,7 +211,7 @@ void card_feed_add(card_feed_t feed, const card_feed_item_t *item)
         lv_obj_set_width(lbl, lv_pct(100));
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_color(lbl, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26_cyrillic, 0);   // было montserrat_14
     }
 
     if (item->body && item->body[0]) {
@@ -218,7 +220,7 @@ void card_feed_add(card_feed_t feed, const card_feed_item_t *item)
         lv_obj_set_width(lbl, lv_pct(100));
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_color(lbl, lv_color_hex(UI_COLOR_TEXT_SECONDARY), LV_PART_MAIN);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26_cyrillic, 0);   // было montserrat_14
     }
 
     card_user_data_t *ud = lv_malloc(sizeof(card_user_data_t));

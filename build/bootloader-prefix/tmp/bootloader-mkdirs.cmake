@@ -10,18 +10,18 @@ if(NOT EXISTS "/home/neo/esp/.espressif/v5.5.4/esp-idf/components/bootloader/sub
   file(MAKE_DIRECTORY "/home/neo/esp/.espressif/v5.5.4/esp-idf/components/bootloader/subproject")
 endif()
 file(MAKE_DIRECTORY
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader"
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix"
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/tmp"
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp"
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src"
-  "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/tmp"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src"
+  "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()

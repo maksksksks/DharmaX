@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/managed_components/lvgl__lvgl
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/managed_components/lvgl__lvgl
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

@@ -17,4 +17,4 @@ set confirm off
 set confirm on
 
 # Load application symbols
-file /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader/bootloader.elf
+file /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader/bootloader.elf

@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/mng_time_date
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/mng_time_date
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

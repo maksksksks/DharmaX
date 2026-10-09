@@ -412,6 +412,133 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct 
                         strncpy(del_data.grp, grp->valuestring, sizeof(del_data.grp) - 1);
                 }
             }
+
+            // ==========================================
+            // НОВОЕ СОБЫТИЕ КАЛЕНДАРЯ (e_new)
+            // ==========================================
+            else if (strcmp(type_item->valuestring, "e_new") == 0) {
+                svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MEDIUM, DURATION_DEFAULT);
+                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
+                if (cJSON_IsObject(data)) {
+                    notify_data e_data;
+                    memset(&e_data, 0, sizeof(e_data));
+
+                    cJSON *id = cJSON_GetObjectItemCaseSensitive(data, "id");
+                    cJSON *app = cJSON_GetObjectItemCaseSensitive(data, "app");
+                    cJSON *title = cJSON_GetObjectItemCaseSensitive(data, "title");
+                    cJSON *txt = cJSON_GetObjectItemCaseSensitive(data, "txt");
+                    cJSON *ts = cJSON_GetObjectItemCaseSensitive(data, "ts");
+                    cJSON *grp = cJSON_GetObjectItemCaseSensitive(data, "grp");
+
+                    if (cJSON_IsString(id)) strncpy(e_data.id, id->valuestring, sizeof(e_data.id) - 1);
+                    if (cJSON_IsString(app)) strncpy(e_data.app, app->valuestring, sizeof(e_data.app) - 1);
+                    if (cJSON_IsString(title)) strncpy(e_data.title, title->valuestring, sizeof(e_data.title) - 1);
+                    if (cJSON_IsString(txt)) strncpy(e_data.txt, txt->valuestring, sizeof(e_data.txt) - 1);
+                    if (cJSON_IsNumber(ts)) e_data.ts = ts->valueint;
+                    if (cJSON_IsString(grp)) strncpy(e_data.grp, grp->valuestring, sizeof(e_data.grp) - 1);
+
+                    ESP_LOGI(TAG, "Новое событие: [%s] %s - %s", e_data.app, e_data.title, e_data.txt);
+                    esp_event_post(APP_EVENTS, EVT_BLE_EVENT_RX, &e_data, sizeof(e_data), pdMS_TO_TICKS(100));
+                }
+            }
+
+            // ==========================================
+            // УДАЛЕНИЕ СОБЫТИЯ КАЛЕНДАРЯ (e_del)
+            // ==========================================
+            else if (strcmp(type_item->valuestring, "e_del") == 0) {
+                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
+                if (cJSON_IsObject(data)) {
+                    notify_del_data del_data;
+                    memset(&del_data, 0, sizeof(del_data));
+
+                    cJSON *id = cJSON_GetObjectItemCaseSensitive(data, "id");
+                    cJSON *grp = cJSON_GetObjectItemCaseSensitive(data, "grp");
+
+                    if (cJSON_IsString(id)) {
+                        strncpy(del_data.id, id->valuestring, sizeof(del_data.id) - 1);
+                        esp_event_post(APP_EVENTS, EVT_BLE_EVENT_DEL, &del_data, sizeof(del_data), pdMS_TO_TICKS(100));
+                    }
+                    if (cJSON_IsString(grp)) strncpy(del_data.grp, grp->valuestring, sizeof(del_data.grp) - 1);
+                }
+            }
+
+            // ==========================================
+            // НОВОСТЬ (news_new)
+            // ==========================================
+            else if (strcmp(type_item->valuestring, "news_new") == 0) {
+                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
+                if (cJSON_IsObject(data)) {
+                    notify_data n_data;
+                    memset(&n_data, 0, sizeof(n_data));
+
+                    cJSON *id = cJSON_GetObjectItemCaseSensitive(data, "id");
+                    cJSON *app = cJSON_GetObjectItemCaseSensitive(data, "app");
+                    cJSON *title = cJSON_GetObjectItemCaseSensitive(data, "title");
+                    cJSON *txt = cJSON_GetObjectItemCaseSensitive(data, "txt");
+                    cJSON *ts = cJSON_GetObjectItemCaseSensitive(data, "ts");
+                    cJSON *grp = cJSON_GetObjectItemCaseSensitive(data, "grp");
+
+                    if (cJSON_IsString(id)) strncpy(n_data.id, id->valuestring, sizeof(n_data.id) - 1);
+                    if (cJSON_IsString(app)) strncpy(n_data.app, app->valuestring, sizeof(n_data.app) - 1);
+                    if (cJSON_IsString(title)) strncpy(n_data.title, title->valuestring, sizeof(n_data.title) - 1);
+                    if (cJSON_IsString(txt)) strncpy(n_data.txt, txt->valuestring, sizeof(n_data.txt) - 1);
+                    if (cJSON_IsNumber(ts)) n_data.ts = ts->valueint;
+                    if (cJSON_IsString(grp)) strncpy(n_data.grp, grp->valuestring, sizeof(n_data.grp) - 1);
+
+                    ESP_LOGI(TAG, "Новость: [%s] %s", n_data.app, n_data.title);
+                    esp_event_post(APP_EVENTS, EVT_BLE_NEWS_RX, &n_data, sizeof(n_data), pdMS_TO_TICKS(100));
+                }
+            }
+
+            // ==========================================
+            // ОБНОВЛЕНИЕ ПЛЕЕРА (media)
+            // ==========================================
+            else if (strcmp(type_item->valuestring, "media") == 0) {
+                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
+                if (cJSON_IsObject(data)) {
+                    media_data_t m_data;
+                    memset(&m_data, 0, sizeof(m_data));
+
+                    cJSON *title = cJSON_GetObjectItemCaseSensitive(data, "title");
+                    cJSON *artist = cJSON_GetObjectItemCaseSensitive(data, "artist");
+                    cJSON *pos = cJSON_GetObjectItemCaseSensitive(data, "pos");
+                    cJSON *dur = cJSON_GetObjectItemCaseSensitive(data, "dur");
+                    cJSON *playing = cJSON_GetObjectItemCaseSensitive(data, "playing");
+
+                    if (cJSON_IsString(title)) strncpy(m_data.title, title->valuestring, sizeof(m_data.title) - 1);
+                    if (cJSON_IsString(artist)) strncpy(m_data.artist, artist->valuestring, sizeof(m_data.artist) - 1);
+                    if (cJSON_IsNumber(pos)) m_data.position_sec = (uint32_t)pos->valueint;
+                    if (cJSON_IsNumber(dur)) m_data.duration_sec = (uint32_t)dur->valueint;
+                    if (cJSON_IsBool(playing)) m_data.is_playing = cJSON_IsTrue(playing);
+
+                    esp_event_post(APP_EVENTS, EVT_BLE_MEDIA_UPDATED, &m_data, sizeof(m_data), pdMS_TO_TICKS(100));
+                }
+            }
+
+            // ==========================================
+            // СТАТУС ТЕЛЕФОНА (phone_status)
+            // ==========================================
+            else if (strcmp(type_item->valuestring, "phone_status") == 0) {
+                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "d");
+                if (cJSON_IsObject(data)) {
+                    phone_status_data_t p_data;
+                    memset(&p_data, 0, sizeof(p_data));
+                    p_data.signal_percent = -1;
+                    p_data.battery_percent = -1;
+
+                    cJSON *signal = cJSON_GetObjectItemCaseSensitive(data, "signal");
+                    cJSON *battery = cJSON_GetObjectItemCaseSensitive(data, "battery");
+                    cJSON *charging = cJSON_GetObjectItemCaseSensitive(data, "charging");
+                    cJSON *carrier = cJSON_GetObjectItemCaseSensitive(data, "carrier");
+
+                    if (cJSON_IsNumber(signal)) p_data.signal_percent = (int8_t)signal->valueint;
+                    if (cJSON_IsNumber(battery)) p_data.battery_percent = (int8_t)battery->valueint;
+                    if (cJSON_IsBool(charging)) p_data.charging = cJSON_IsTrue(charging);
+                    if (cJSON_IsString(carrier)) strncpy(p_data.carrier, carrier->valuestring, sizeof(p_data.carrier) - 1);
+
+                    esp_event_post(APP_EVENTS, EVT_BLE_PHONE_STATUS_UPDATED, &p_data, sizeof(p_data), pdMS_TO_TICKS(100));
+                }
+            }
         }
 
         // 4. Обязательно удаляем JSON из памяти!

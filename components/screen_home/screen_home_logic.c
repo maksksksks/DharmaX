@@ -111,8 +111,10 @@ static void apply_theme(void)
     lv_obj_set_style_text_color(ui_Label3, lv_color_hex(UI_COLOR_TEXT_SECONDARY), LV_PART_MAIN); // battery
 
     // Панель шагомера: чёрная поверхность + тонкая акцентная обводка вместо белой
-    lv_obj_set_style_bg_color(ui_Panel1, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ui_Panel1, LV_OPA_TRANSP, LV_PART_MAIN);       // панель прозрачна, сливается с фоном
     lv_obj_set_style_outline_color(ui_Panel1, lv_color_hex(UI_COLOR_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_outline_width(ui_Panel1, 1, LV_PART_MAIN);            // было 3 (задано в ui_ScreenHome.c)
+    lv_obj_set_style_outline_opa(ui_Panel1, LV_OPA_60, LV_PART_MAIN);
 }
 
 static void build_pedometer_widget(void)

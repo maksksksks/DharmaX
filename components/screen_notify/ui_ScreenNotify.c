@@ -7,7 +7,6 @@
 
 lv_obj_t * ui_ScreenNotify = NULL;
 lv_obj_t * ui_Label8 = NULL;
-lv_obj_t * ui_TabView1 = NULL;
 // event funtions
 // event funtions
 void ui_event_ScreenNotify(lv_event_t * e)
@@ -28,13 +27,13 @@ _ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSD_
 void ui_ScreenNotify_screen_init(void)
 {
     ui_ScreenNotify = lv_obj_create(NULL);
-    lv_obj_remove_flag(ui_ScreenNotify, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_remove_flag(ui_ScreenNotify, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(ui_ScreenNotify, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ScreenNotify, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label8 = lv_label_create(ui_ScreenNotify);
-    lv_obj_set_width(ui_Label8, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label8, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_width(ui_Label8, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_Label8, LV_SIZE_CONTENT);
     lv_obj_set_x(ui_Label8, 0);
     lv_obj_set_y(ui_Label8, -200);
     lv_obj_set_align(ui_Label8, LV_ALIGN_CENTER);
@@ -43,27 +42,13 @@ void ui_ScreenNotify_screen_init(void)
     lv_obj_set_style_text_opa(ui_Label8, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_Label8, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_TabView1 = lv_tabview_create(ui_ScreenNotify);
-    lv_tabview_set_tab_bar_size(ui_TabView1, 50);
-    lv_obj_set_width(ui_TabView1, 100);
-    lv_obj_set_height(ui_TabView1, 200);
-    lv_obj_set_x(ui_TabView1, 604);
-    lv_obj_set_y(ui_TabView1, 414);
-    lv_obj_set_align(ui_TabView1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_TabView1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
     lv_obj_add_event_cb(ui_ScreenNotify, ui_event_ScreenNotify, LV_EVENT_ALL, NULL);
-
 }
 
 void ui_ScreenNotify_screen_destroy(void)
 {
     if(ui_ScreenNotify) lv_obj_del(ui_ScreenNotify);
-
-    // NULL screen variables
     ui_ScreenNotify = NULL;
     ui_Label8 = NULL;
-    ui_TabView1 = NULL;
-
 }
 

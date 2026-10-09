@@ -1,4 +1,4 @@
-# Install script for directory: /home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/components/screen_sd
+# Install script for directory: /home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/components/screen_sd
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

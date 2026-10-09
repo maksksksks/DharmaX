@@ -5,7 +5,7 @@
 
 #include "ui.h"
 
-LV_FONT_DECLARE(lv_font_montserrat_14_cyrillic) 
+LV_FONT_DECLARE(lv_font_montserrat_26_cyrillic) 
 
 lv_obj_t * ui_ScreenHome = NULL;
 lv_obj_t * ui_Label1 = NULL;
@@ -56,7 +56,7 @@ void ui_ScreenHome_screen_init(void)
     lv_label_set_text(ui_Label1, "WeekDay");
     lv_obj_set_style_text_color(ui_Label1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_Label1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_14_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_26_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label2 = lv_label_create(ui_ScreenHome);
     lv_obj_set_width(ui_Label2, LV_SIZE_CONTENT);   /// 1
@@ -67,7 +67,7 @@ void ui_ScreenHome_screen_init(void)
     lv_label_set_text(ui_Label2, "MounthDay");
     lv_obj_set_style_text_color(ui_Label2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_Label2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_14_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_26_cyrillic, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label5 = lv_label_create(ui_ScreenHome);
     lv_obj_set_width(ui_Label5, LV_SIZE_CONTENT);   /// 1

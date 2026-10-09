@@ -1,6 +1,6 @@
-set(CMAKE_HOST_SYSTEM "Linux-7.0.10-arch1-1")
+set(CMAKE_HOST_SYSTEM "Linux-7.2.2-arch1-1")
 set(CMAKE_HOST_SYSTEM_NAME "Linux")
-set(CMAKE_HOST_SYSTEM_VERSION "7.0.10-arch1-1")
+set(CMAKE_HOST_SYSTEM_VERSION "7.2.2-arch1-1")
 set(CMAKE_HOST_SYSTEM_PROCESSOR "x86_64")
 
 include("/home/neo/esp/.espressif/v5.5.4/esp-idf/tools/cmake/toolchain-esp32s3.cmake")

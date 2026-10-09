@@ -2,34 +2,34 @@
 	"sources" : 
 	[
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/CMakeFiles/bootloader"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/CMakeFiles/bootloader"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/CMakeFiles/bootloader.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/CMakeFiles/bootloader.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/CMakeFiles/bootloader-complete.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/CMakeFiles/bootloader-complete.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule"
 		},
 		{
-			"file" : "/home/neo/mydisk/Projects/ESP-IDF/DharmaX-2/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule"
+			"file" : "/home/neo/mydisk/Projects/Bharata/DharmaX/Firmware/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule"
 		}
 	],
 	"target" : 
