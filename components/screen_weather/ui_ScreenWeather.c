@@ -50,6 +50,33 @@ void ui_ScreenWeather_screen_init(void)
     lv_obj_set_style_text_opa(ui_Label11, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_Label11, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+        // Красная надпись
+    lv_obj_t *label_red = lv_label_create(ui_ScreenWeather);
+    lv_label_set_text(label_red, "RED");
+    lv_obj_set_align(label_red, LV_ALIGN_CENTER);
+    lv_obj_set_y(label_red, -50);
+    lv_obj_set_style_text_color(label_red, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(label_red, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(label_red, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    // Зеленая надпись
+    lv_obj_t *label_green = lv_label_create(ui_ScreenWeather);
+    lv_label_set_text(label_green, "GREEN");
+    lv_obj_set_align(label_green, LV_ALIGN_CENTER);
+    lv_obj_set_y(label_green, 0);
+    lv_obj_set_style_text_color(label_green, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(label_green, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(label_green, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    // Синяя надпись
+    lv_obj_t *label_blue = lv_label_create(ui_ScreenWeather);
+    lv_label_set_text(label_blue, "BLUE");
+    lv_obj_set_align(label_blue, LV_ALIGN_CENTER);
+    lv_obj_set_y(label_blue, 50);
+    lv_obj_set_style_text_color(label_blue, lv_color_hex(0x0000FF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(label_blue, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(label_blue, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    
     lv_obj_add_event_cb(ui_ScreenWeather, ui_event_ScreenWeather, LV_EVENT_ALL, NULL);
 
 }

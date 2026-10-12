@@ -19,5 +19,7 @@
       "inheritDefault": "hidden"
     }
   },
-  "idf.currentSetup": "/home/neo/esp/.espressif/v5.5.4/esp-idf"
+  "idf.currentSetup": "/home/Neo/.espressif/v5.5.4/esp-idf",
+  "idf.port": "/dev/ttyACM0",
+  "idf.flashType": "UART"
 }

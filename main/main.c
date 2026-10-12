@@ -75,20 +75,34 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
 // ═══════════════════════════════════════════════════════
 // CALLBACK-И ДЛЯ LVGL 9
 // ═══════════════════════════════════════════════════════
-static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_map)
+static void example_lvgl_flush_cb(
+    lv_display_t *disp,
+    const lv_area_t *area,
+    uint8_t *color_map)
 {
-    esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
-    const int offsetx1 = area->x1 + 0x14;  // Аппаратный сдвиг SH8601
+    esp_lcd_panel_handle_t panel_handle =
+        (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
+
+    const int offsetx1 = area->x1 + 0x14;
     const int offsetx2 = area->x2 + 0x14;
     const int offsety1 = area->y1;
     const int offsety2 = area->y2;
 
-    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_map);
-    // ★ lv_display_flush_ready() ЗДЕСЬ БОЛЬШЕ НЕ ВЫЗЫВАЕТСЯ - см. example_notify_lvgl_flush_ready().
-    // esp_lcd_panel_draw_bitmap() для QSPI лишь ставит DMA-транзакцию в очередь и
-    // возвращается немедленно - вызов flush_ready() тут означал "буфер свободен"
-    // ДО того, как данные реально долетели до панели. Это и было причиной
-    // смазывания/артефактов именно в обновляемых областях.
+    size_t pixel_count =
+        (size_t)(area->x2 - area->x1 + 1) *
+        (size_t)(area->y2 - area->y1 + 1);
+
+    uint16_t *pixels = (uint16_t *)color_map;
+
+    for (size_t i = 0; i < pixel_count; i++) {
+        pixels[i] = (uint16_t)((pixels[i] >> 8) | (pixels[i] << 8));
+    }
+
+    esp_lcd_panel_draw_bitmap(
+        panel_handle,
+        offsetx1, offsety1,
+        offsetx2 + 1, offsety2 + 1,
+        color_map);
 }
 
 // ★ КРИТИЧНО для SH8601: контроллер требует, чтобы область частичного
