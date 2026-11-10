@@ -1,4 +1,7 @@
 #include "svc_ble_sync.h"
+#include "ble_logs.h"
+#include "ble_state.h"
+#include "ble_advertise.h"
 #include "app_events.h"
 #include "cJSON.h"
 #include "esp_bt.h"
@@ -27,271 +30,6 @@ static const char *TAG = "SVC_BLE";
 #define BLE_CHR_UUID_ACTION 0x5680 // Часы шлют кнопки отсюда
 #define BLE_CHR_UUID_LOG_STREAM 0x5681
 
-
-
-static uint16_t action_chr_val_handle = 0; // Хэндл характеристики
-static uint16_t active_conn_handle = 0;    // Хэндл подключения
-static uint16_t time_sync_conn_handle;
-static uint8_t own_addr_type;
-
-static uint16_t log_chr_val_handle = 0;
-static QueueHandle_t log_queue = NULL;
-static bool log_subscribed = false;  // Телефон подписался на уведомления?
-
-static int (*original_vprintf)(const char *fmt, va_list args) = NULL;
-
-// Структура пакета лога
-typedef struct {
-    uint32_t timestamp_ms;
-    uint8_t level;
-    char tag[12];    // Короткий тег (большинство тегов в проекте ~8-10 символов)
-    char msg[180];   // Сообщение с запасом
-} ble_log_item_t;
-
-// Состояние
-static bool ble_running = false;
-static bool ble_advertising = false;
-static bool ble_initialized = false;
-
-static void ble_advertise(void);
-
-static volatile bool ble_bonds_loaded = false; // Флаг готовности
-
-// Кастомный коллбэк для отслеживания загрузки хранилища
-static int ble_store_load_cb(int obj_type, union ble_store_value *val, void *arg) {
-    // Просто считаем количество загруженных ключей для отладки
-    static int loaded_count = 0;
-    if (obj_type == BLE_STORE_OBJ_TYPE_PEER_SEC) {
-        loaded_count++;
-        ESP_LOGD(TAG, "Загружен ключ #%d для %02X:%02X:...", loaded_count, val->sec.peer_addr.val[5],
-                 val->sec.peer_addr.val[4]);
-    }
-    return 0;
-}
-
-/**
- * @brief Парсит строку лога в формате ESP-IDF: "I (1234) TAG: message"
- * @return true если успешно распаршено
- */
-// Возвращает: 1 = распарсено успешно, 0 = не распарсилось, -1 = отфильтровано (пропустить)
-static int parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
-    if (strlen(full_msg) < 10) return 0;
-    
-    char level_char = full_msg[0];
-    item->level = ESP_LOG_INFO;
-    if (level_char == 'E') item->level = ESP_LOG_ERROR;
-    else if (level_char == 'W') item->level = ESP_LOG_WARN;
-    else if (level_char == 'D') item->level = ESP_LOG_DEBUG;
-
-    const char *paren_close = strchr(full_msg, ')');
-    if (!paren_close) return 0;
-    
-    const char *after_paren = paren_close + 1;
-    while (*after_paren == ' ') after_paren++;
-    
-    const char *colon = strchr(after_paren, ':');
-    if (!colon) return 0;
-    
-    size_t tag_len = colon - after_paren;
-    if (tag_len == 0 || tag_len >= sizeof(item->tag)) return 0;
-    
-    strncpy(item->tag, after_paren, tag_len);
-    item->tag[tag_len] = '\0';
-
-    // ★ ФИЛЬТР: возвращаем -1 (пропустить), а не 0!
-    if (strcmp(item->tag, "NimBLE") == 0) return -1;
-    if (strcmp(item->tag, "esp_image") == 0) return -1;
-    if (strcmp(item->tag, "boot") == 0) return -1;
-    if (strcmp(item->tag, "phy_init") == 0) return -1;
-    if (strcmp(item->tag, "heap_init") == 0) return -1;
-    if (strcmp(item->tag, "wifi") == 0) return -1;
-    if (strcmp(item->tag, "BT_PHY") == 0) return -1;
-    if (strcmp(item->tag, "BT_BTM") == 0) return -1;
-    if (strcmp(item->tag, "BT_L2CAP") == 0) return -1;
-    if (strcmp(item->tag, "BT_SMP") == 0) return -1;
-    if (strcmp(item->tag, "BT_GATT") == 0) return -1;
-    
-    const char *msg_start = colon + 1;
-    while (*msg_start == ' ') msg_start++;
-    
-    // ★ Фильтр по содержимому (тоже -1)
-    if (strstr(msg_start, "GATT procedure initiated") != NULL) return -1;
-    if (strstr(msg_start, "att_handle=") != NULL) return -1;
-    
-    strncpy(item->msg, msg_start, sizeof(item->msg) - 1);
-    item->msg[sizeof(item->msg) - 1] = '\0';
-    
-    return 1; // успешно распарсено
-}
-
-/**
- * @brief Исправленный перехватчик (буферизация ДО использования args)
- */
-static int ble_log_hook_vprintf(const char *fmt, va_list args) {
-    // 1. Буферизируем сообщение
-    char full_msg[256];
-    va_list args_copy;
-    va_copy(args_copy, args);
-    vsnprintf(full_msg, sizeof(full_msg), fmt, args_copy);
-    va_end(args_copy);
-
-    // 2. Вывод в UART
-    int ret = 0;
-    if (original_vprintf) {
-        ret = original_vprintf(fmt, args);
-    }
-
-    // ★ ОТЛАДКА: покажем, что хук вызван
-    static int hook_call_count = 0;
-    hook_call_count++;
-    if (hook_call_count <= 10) {  // Первые 10 вызовов
-        printf("[HOOK #%d] ble_running=%d, log_subscribed=%d, queue=%p\n", 
-               hook_call_count, ble_running, log_subscribed, log_queue);
-    }
-
-    // 3. Проверки
-    if (!ble_running) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: ble_running=false\n");
-        }
-        return ret;
-    }
-    if (!log_subscribed) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: log_subscribed=false\n");
-        }
-        return ret;
-    }
-    if (log_queue == NULL) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: log_queue=NULL\n");
-        }
-        return ret;
-    }
-
-    // 4. Парсим строку
-    ble_log_item_t *item = malloc(sizeof(ble_log_item_t));
-    if (!item) return ret;
-
-    item->timestamp_ms = esp_timer_get_time() / 1000;
-
-    int parse_result = parse_esp_log_line(full_msg, item);
-    if (parse_result == -1) {
-        // ★ ОТФИЛЬТРОВАНО — просто пропускаем, НЕ отправляем!
-        free(item);
-        return ret;
-    }
-    if (parse_result == 0) {
-        // Не удалось распарсить — отправляем как есть
-        item->level = ESP_LOG_INFO;
-        strncpy(item->tag, "APP", sizeof(item->tag) - 1);
-        strncpy(item->msg, full_msg, sizeof(item->msg) - 1);
-        item->msg[sizeof(item->msg) - 1] = '\0';
-    }
-    // parse_result == 1 → уже заполнено, отправляем
-
-    // 6. Отправка в очередь
-    if (xQueueIsQueueFullFromISR(log_queue)) {
-        ble_log_item_t *dummy;
-        xQueueReceive(log_queue, &dummy, 0);
-        if (dummy) free(dummy);
-    }
-
-    if (xQueueSend(log_queue, &item, 0) != pdTRUE) {
-        free(item);
-    }
-
-    return ret;
-}
-
-/**
- * @brief Задача отправки накопленных логов в BLE
- */
-static void ble_log_sender_task(void *param) {
-    ble_log_item_t *item;
-    uint8_t tx_buffer[240];  // С запасом под MTU=247
-
-    while (1) {
-        // Ждём элемент из очереди (с таймаутом для периодических проверок)
-        if (xQueueReceive(log_queue, &item, pdMS_TO_TICKS(50)) == pdTRUE && item) {
-            
-            // Проверяем актуальность подключения
-            if (!log_subscribed || active_conn_handle == 0) {
-                free(item);
-                continue;
-            }
-
-            // Формируем пакет: [1B level][4B timestamp][N bytes tag:msg]
-            uint16_t pos = 0;
-            tx_buffer[pos++] = item->level;
-            memcpy(tx_buffer + pos, &item->timestamp_ms, 4);
-            pos += 4;
-
-            // Кодируем "TAG:msg" с нуль-терминатором для простоты парсинга на телефоне
-            int written = snprintf((char*)tx_buffer + pos, 
-                                  sizeof(tx_buffer) - pos, 
-                                  "%s:%s", item->tag, item->msg);
-            pos += written;
-            if (pos >= sizeof(tx_buffer) - 1) pos = sizeof(tx_buffer) - 1;
-            tx_buffer[pos++] = '\0';  // Терминатор для удобства на телефоне
-
-            // Отправляем NOTIFY
-            struct os_mbuf *om = ble_hs_mbuf_from_flat(tx_buffer, pos);
-            if (om) {
-                int rc = ble_gatts_notify_custom(active_conn_handle, 
-                                                 log_chr_val_handle, om);
-                if (rc != 0) {
-                    ESP_LOGD(TAG, "Notify failed: %d", rc);
-                }
-            }
-
-            free(item);  // Освобождаем память
-        }
-        
-        // Опционально: можно добавить "пульс" раз в секунду, если нет логов
-        // но подписка активна — для keep-alive
-    }
-}
-
-/**
- * @brief Инициализация BLE-логгера (вызвать в ble_do_init)
- */
-void ble_log_stream_init(void) {
-    log_queue = xQueueCreate(20, sizeof(ble_log_item_t*));
-    if (!log_queue) {
-        ESP_LOGE(TAG, "❌ Failed to create log queue!");
-        return;
-    }
-    ESP_LOGI(TAG, "✅ Log queue created");
-
-    original_vprintf = esp_log_set_vprintf(ble_log_hook_vprintf);
-    if (original_vprintf == NULL) {
-        ESP_LOGW(TAG, "⚠ Original vprintf was NULL (first hook?)");
-    } else {
-        ESP_LOGI(TAG, "✅ Log hook installed");
-    }
-}
-
-/**
- * @brief Запуск задачи-отправителя (вызвать после nimble_port_freertos_init)
- */
-void ble_log_sender_start(void) {
-    xTaskCreate(ble_log_sender_task, "ble_log_snd", 4096, NULL, 5, NULL);
-    ESP_LOGI(TAG, "BLE log sender task started");
-}
-
-// Функция ожидания полной загрузки ключей
-static void wait_for_bonds_loaded(void) {
-    // Даём до 500мс на загрузку ключей из NVS
-    for (int i = 0; i < 50 && !ble_bonds_loaded; i++) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    if (ble_bonds_loaded) {
-        ESP_LOGI(TAG, "✓ Ключи сопряжения загружены из NVS");
-    } else {
-        ESP_LOGW(TAG, "⚠ Таймаут загрузки ключей (возможно, нет сохранённых устройств)");
-    }
-}
 
 // ==========================================
 // GATT CALLBACK
@@ -587,13 +325,13 @@ static const struct ble_gatt_svc_def gatt_services[] = {
                 {
                     .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_ACTION),
                     .access_cb = action_chr_access,
-                    .val_handle = &action_chr_val_handle,
+                    .val_handle = &ble_state.action_chr_val_handle,
                     .flags = BLE_GATT_CHR_F_NOTIFY,
                 },
                 {
                     .uuid = BLE_UUID16_DECLARE(BLE_CHR_UUID_LOG_STREAM),
                     .access_cb = log_chr_access,
-                    .val_handle = &log_chr_val_handle,
+                    .val_handle = &ble_state.log_chr_val_handle,
                     .flags = BLE_GATT_CHR_F_NOTIFY,
                 },
                 {0},  // ← Терминатор массива характеристик
@@ -605,7 +343,7 @@ static const struct ble_gatt_svc_def gatt_services[] = {
 static void gatt_svc_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {}
 
 void send_action_to_phone(uint8_t action_code) {
-    if (active_conn_handle == 0 || action_chr_val_handle == 0) {
+    if (ble_state.active_conn_handle == 0 || ble_state.action_chr_val_handle == 0) {
         ESP_LOGW(TAG, "Нет подключения или хэндла");
         return;
     }
@@ -614,10 +352,10 @@ void send_action_to_phone(uint8_t action_code) {
     if (om == NULL)
         return;
 
-    ble_gatts_notify_custom(active_conn_handle, action_chr_val_handle, om);
+    ble_gatts_notify_custom(ble_state.active_conn_handle, ble_state.action_chr_val_handle, om);
     ESP_LOGI(TAG, "Действие 0x%02X отправлено на телефон", action_code);
 }
-
+/*
 static const char *addr_type_to_str(uint8_t type) {
     switch (type) {
     case BLE_ADDR_PUBLIC:
@@ -630,28 +368,29 @@ static const char *addr_type_to_str(uint8_t type) {
         return "UNKNOWN";
     }
 }
+*/
 
-static int ble_gap_event(struct ble_gap_event *event, void *arg) {
+int ble_gap_event(struct ble_gap_event *event, void *arg) {
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         ESP_LOGI(TAG, "Телефон подключен! conn_handle=%d status=%d", event->connect.conn_handle, event->connect.status);
 
         int8_t rssi = 0;
-        ble_gap_conn_rssi(active_conn_handle, &rssi);
+        ble_gap_conn_rssi(ble_state.active_conn_handle, &rssi);
         ESP_LOGI(TAG, "📶 RSSI телефона при подключении: %d dBm", rssi);
 
         if (event->connect.status != 0) {
             // Подключение не удалось — стек сам вернёт нас в adv, делать ничего не нужно.
             ESP_LOGW(TAG, "Подключение не удалось (status=%d), перезапуск рекламы", event->connect.status);
-            if (ble_running)
-                ble_advertise();
+            if (ble_state.running)
+                ble_advertise_start();
             break;
         }
 
         if (event->connect.status == 0) {
-            active_conn_handle = event->connect.conn_handle;
+            ble_state.active_conn_handle = event->connect.conn_handle;
             uint16_t conn_handle = event->connect.conn_handle;
-            active_conn_handle = conn_handle;
+            ble_state.active_conn_handle = conn_handle;
 
             struct ble_gap_upd_params conn_params = {
                 .itvl_min = 0x30,  // 48 * 0.625 = 30 мс
@@ -670,14 +409,14 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
             }
 
             // ★ НОВОЕ: Если ключи ещё не загружены — даём 100мс на завершение
-            if (!ble_bonds_loaded) {
+            if (!ble_state.bonds_loaded) {
                 ESP_LOGW(TAG, "⚠ Подключение до загрузки ключей, ждём 100мс...");
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
 
             // Проверяем состояние шифрования
             struct ble_gap_conn_desc desc;
-            if (ble_gap_conn_find(active_conn_handle, &desc) == 0) {
+            if (ble_gap_conn_find(ble_state.active_conn_handle, &desc) == 0) {
                 if (desc.sec_state.encrypted) {
                     ESP_LOGI(TAG, "✓ Соединение уже зашифровано (bond восстановлен из NVS)");
                 } else {
@@ -692,11 +431,11 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         }
 
         svc_vibro_send_event(VIBRATION_EVENT_SINGLE_SHORT, LEVEL_MAX, DURATION_DEFAULT);
-        ble_advertising = false;
-        active_conn_handle = event->connect.conn_handle;
+        ble_state.advertising = false;
+        ble_state.active_conn_handle = event->connect.conn_handle;
         {
             struct ble_gap_conn_desc desc;
-            if (ble_gap_conn_find(active_conn_handle, &desc) == 0 && desc.sec_state.encrypted) {
+            if (ble_gap_conn_find(ble_state.active_conn_handle, &desc) == 0 && desc.sec_state.encrypted) {
                 ESP_LOGI(TAG, "✓ Соединение уже зашифровано (восстановлено из bonding)");
             } else {
                 ESP_LOGI(TAG, "… Ожидаем, что central инициирует шифрование (LTK из bond)");
@@ -705,12 +444,12 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "Телефон отключен.");
-        active_conn_handle = 0;
+        ble_state.active_conn_handle = 0;
         // Стираем PIN с экрана, если он там остался
         esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
         svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
-        if (ble_running)
-            ble_advertise();
+        if (ble_state.running)
+            ble_advertise_start();
         break;
 
     case BLE_GAP_EVENT_ENC_CHANGE:
@@ -732,16 +471,16 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
                 event->subscribe.cur_indicate);
         
         // ★ FIX: сравниваем с хэндлом характеристики, а не дескриптора!
-        if (event->subscribe.attr_handle == log_chr_val_handle) {  // ← БЫЛО: +1, СТАЛО: без +1
-            log_subscribed = (event->subscribe.cur_notify != 0);
+        if (event->subscribe.attr_handle == ble_state.log_chr_val_handle) {  // ← БЫЛО: +1, СТАЛО: без +1
+            ble_state.log_subscribed = (event->subscribe.cur_notify != 0);
             ESP_LOGI(TAG, "📡 Log subscription: %s", 
-                    log_subscribed ? "✅ ENABLED" : "❌ DISABLED");
+                    ble_state.log_subscribed ? "✅ ENABLED" : "❌ DISABLED");
             
-            if (!log_subscribed) {
+            if (!ble_state.log_subscribed) {
                 // Очистка очереди при отписке
                 ble_log_item_t *item;
                 int count = 0;
-                while (xQueueReceive(log_queue, &item, 0) == pdTRUE && item) {
+                while (xQueueReceive(ble_state.log_queue, &item, 0) == pdTRUE && item) {
                     free(item);
                     count++;
                 }
@@ -808,39 +547,6 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     return 0;
 }
 
-static void ble_advertise(void) {
-    struct ble_gap_adv_params adv_params;
-    struct ble_hs_adv_fields fields;
-    int rc;
-
-    memset(&fields, 0, sizeof(fields));
-    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.tx_pwr_lvl_is_present = 1;
-    fields.tx_pwr_lvl = 9; // ★ Явно указываем +9 dBm в пакете рекламы
-    fields.name = (uint8_t *)"DharmaX";
-    fields.name_len = strlen("DharmaX");
-    fields.name_is_complete = 1;
-
-    rc = ble_gap_adv_set_fields(&fields);
-    if (rc != 0) { ESP_LOGE(TAG, "adv_set_fields error: %d", rc); return; }
-
-    memset(&adv_params, 0, sizeof(adv_params));
-    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
-    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    
-    // ★ ИНТЕРВАЛЫ РЕКЛАМЫ (в единицах 0.625 мс)
-    // 0x60 = 96 * 0.625 = 60 мс (быстрое обнаружение, но не перегружает эфир)
-    adv_params.itvl_min = 0x60; 
-    adv_params.itvl_max = 0x80; // 100 мс
-    //adv_params.channel_map = BLE_GAP_ADV_CHANNEL_MAP_ALL; // Все 3 канала (37,38,39)
-
-    rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, NULL);
-    if (rc != 0) { ESP_LOGE(TAG, "adv_start error: %d", rc); return; }
-
-    ble_advertising = true;
-    ESP_LOGI(TAG, "📡 Реклама запущена (60-100 мс, TX=+9 dBm)");
-}
-
 static void ble_on_sync(void) {
     int rc;
     rc = ble_hs_util_ensure_addr(0);
@@ -849,7 +555,7 @@ static void ble_on_sync(void) {
         return;
     }
 
-    rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    rc = ble_hs_id_infer_auto(0, &ble_state.own_addr_type);
     if (rc != 0) {
         ESP_LOGE(TAG, "infer_addr error: %d", rc);
         return;
@@ -863,8 +569,8 @@ static void ble_on_sync(void) {
         ESP_LOGW(TAG, "⚠ Не удалось получить количество ключей: %d", rc_count);
     }
 
-    if (ble_running)
-        ble_advertise();
+    if (ble_state.running)
+        ble_advertise_start();
 }
 
 static void ble_host_task(void *param) {
@@ -876,8 +582,8 @@ static void ble_host_task(void *param) {
 
     nimble_port_freertos_deinit();
 
-    ble_running = false;
-    ble_advertising = false;
+    ble_state.running = false;
+    ble_state.advertising = false;
     ESP_LOGI(TAG, "BLE Host Task завершена");
 }
 
@@ -889,8 +595,8 @@ static void ble_do_init(void) {
 
     
 
-    ble_initialized = true;
-    ble_running = true; // Помечаем сразу, чтобы settings_tile знал
+    ble_state.initialized = true;
+    ble_state.running = true; // Помечаем сразу, чтобы settings_tile знал
 
     // 1. NimBLE port init
     rc = nimble_port_init();
@@ -976,12 +682,12 @@ static void ble_do_init(void) {
     // Опционально: проверить, что ключи действительно загружены
     //int peer_count = ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, NULL);
     //ESP_LOGI(TAG, "Найдено сохранённых устройств в NVS: %d", peer_count);
-    ble_bonds_loaded = true; // Сигнализируем, что загрузка завершена
+    ble_state.bonds_loaded = true; // Сигнализируем, что загрузка завершена
 
     // 8. Запуск задачи (реклама начнётся автоматически в ble_on_sync → ble_advertise)
     nimble_port_freertos_init(ble_host_task);
 
-    // ble_advertise();
+    // ble_advertise_start();
     ble_log_sender_start();
 
     ESP_LOGI(TAG, "🧪 TEST: обычный лог без скобок в тексте");
@@ -993,11 +699,11 @@ static void ble_do_init(void) {
 
     // После ble_gatts_add_svcs():
     ESP_LOGI(TAG, "✅ Характеристики зарегистрированы:");
-    ESP_LOGI(TAG, "   action: 0x%04X", action_chr_val_handle);
-    ESP_LOGI(TAG, "   logs: 0x%04X", log_chr_val_handle);
+    ESP_LOGI(TAG, "   action: 0x%04X", ble_state.action_chr_val_handle);
+    ESP_LOGI(TAG, "   logs: 0x%04X", ble_state.log_chr_val_handle);
 
-    if (log_chr_val_handle == 0) {
-        ESP_LOGE(TAG, "❌ КРИТИЧЕСКАЯ ОШИБКА: log_chr_val_handle = 0!");
+    if (ble_state.log_chr_val_handle == 0) {
+        ESP_LOGE(TAG, "❌ КРИТИЧЕСКАЯ ОШИБКА: ble_state.log_chr_val_handle = 0!");
         ESP_LOGE(TAG, "   Характеристика логов НЕ зарегистрирована!");
     }
 }
@@ -1025,20 +731,20 @@ static int delete_all_peers_iter_cb(int obj_type, union ble_store_value *val, vo
  * @brief Принудительно удалить ключи сопряжения для ТЕКУЩЕГО подключенного устройства
  */
 void svc_ble_delete_current_peer(void) {
-    if (active_conn_handle == 0) {
+    if (ble_state.active_conn_handle == 0) {
         ESP_LOGW(TAG, "Нет активного подключения, удалять нечего");
         return;
     }
 
     struct ble_gap_conn_desc desc;
-    int rc = ble_gap_conn_find(active_conn_handle, &desc);
+    int rc = ble_gap_conn_find(ble_state.active_conn_handle, &desc);
     if (rc == 0) {
         ESP_LOGI(TAG, "Принудительное удаление ключей для текущего устройства");
         ble_store_util_delete_peer(&desc.peer_id_addr);
 
         // Разрываем соединение, чтобы телефон понял, что ключи стерты
-        ble_gap_terminate(active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        active_conn_handle = 0;
+        ble_gap_terminate(ble_state.active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        ble_state.active_conn_handle = 0;
     } else {
         ESP_LOGE(TAG, "Не найти дескриптор подключения: %d", rc);
     }
@@ -1052,9 +758,9 @@ void svc_ble_delete_all_peers(void) {
     ESP_LOGI(TAG, "Принудительное удаление ВСЕХ ключей из памяти!");
 
     // 1. Сначала отключаем телефон, если он подключен
-    if (active_conn_handle != 0) {
-        ble_gap_terminate(active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        active_conn_handle = 0;
+    if (ble_state.active_conn_handle != 0) {
+        ble_gap_terminate(ble_state.active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        ble_state.active_conn_handle = 0;
         vTaskDelay(pdMS_TO_TICKS(100)); // Даем время на разрыв
     }
 
@@ -1065,71 +771,70 @@ void svc_ble_delete_all_peers(void) {
     ESP_LOGI(TAG, "Все ключи удалены. При следующем подключении потребуется PIN.");
 
     // 3. Перезапускаем рекламу, чтобы можно было подключиться заново
-    if (ble_running && !ble_advertising) {
-        ble_advertise();
+    if (ble_state.running && !ble_state.advertising) {
+        ble_advertise_start();
     }
 }
 
 void svc_ble_sync_stop(void) {
-    if (!ble_running)
+    if (!ble_state.running)
         return;
 
     ESP_LOGI(TAG, "◄ Остановка BLE...");
 
     // Только останавливаем рекламу и помечаем что не работаем
-    if (ble_advertising) {
+    if (ble_state.advertising) {
         ble_gap_adv_stop();
-        ble_advertising = false;
+        ble_state.advertising = false;
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    if (active_conn_handle != 0) {
-        ble_gap_terminate(active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        active_conn_handle = 0; // Сбрасываем
+    if (ble_state.active_conn_handle != 0) {
+        ble_gap_terminate(ble_state.active_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        ble_state.active_conn_handle = 0; // Сбрасываем
     }
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // ★ НЕ трогаем nimble_port! Он продолжает работать в фоне.
     // ★ Это потребляет ~1-2mA но ЗАТО гарантированно работает!
 
-    ble_running = false;
+    ble_state.running = false;
     ESP_LOGI(TAG, "BLE остановлен (режим ожидания, экономия ~3mA)");
 }
 
 void svc_ble_sync_start(void) {
-    if (ble_running) {
+    if (ble_state.running) {
         ESP_LOGW(TAG, "BLE уже работает");
         return;
     }
 
     // Если NimBLE ещё не инициализирован - первый запуск
-    if (!ble_initialized) {
+    if (!ble_state.initialized) {
         ble_do_init();
     } else {
         // Повторный запуск - просто запускаем рекламу снова!
-        ble_running = true;
-        ble_advertise(); // ← Всё! Никакой reinit!
+        ble_state.running = true;
+        ble_advertise_start(); // ← Всё! Никакой reinit!
         ESP_LOGI(TAG, "▶️ BLE возобновлён (быстрый старт)");
     }
 }
 
-bool svc_ble_sync_is_running(void) { return ble_running; }
+bool svc_ble_sync_is_running(void) { return ble_state.running; }
 
 void svc_ble_sync_advertise_stop(void) {
-    if (!ble_running || !ble_advertising)
+    if (!ble_state.running)
         return;
 
-    int rc = ble_gap_adv_stop();
-    if (rc == 0) {
-        ble_advertising = false;
-        ESP_LOGI(TAG, "Реклама остановлена (стек активен)");
-    }
+    ble_advertise_stop();
 }
 
 void svc_ble_sync_advertise_start(void) {
-    if (!ble_running || ble_advertising)
+    if (!ble_state.running || ble_state.advertising)
         return;
-    ble_advertise();
+
+    ble_advertise_start();
 }
 
-bool svc_ble_sync_is_advertising(void) { return ble_advertising; }
+bool svc_ble_sync_is_advertising(void) {
+    return ble_state.advertising;
+}
