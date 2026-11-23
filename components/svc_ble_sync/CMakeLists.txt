@@ -4,6 +4,11 @@ idf_component_register(
         "include/ble_state.c"
         "include/ble_advertise.c"
         "include/ble_logs.c"
+        "include/ble_gap_handler.c"
+        "include/ble_gatt.c"
+        "include/ble_notify_parser.c"
+        "include/ble_bonds.c"
+        "include/ble_config.c"
 
     INCLUDE_DIRS
         "."

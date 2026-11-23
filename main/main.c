@@ -55,7 +55,7 @@ static lv_display_t *s_disp = NULL; // ★ нужен коллбэку заве�
 #define EXAMPLE_USE_TOUCH           1
 
 #define EXAMPLE_LVGL_BUF_HEIGHT     40
-#define EXAMPLE_LVGL_TICK_PERIOD_MS 2
+#define EXAMPLE_LVGL_TICK_PERIOD_MS 5
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS  500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS  1
 #define EXAMPLE_LVGL_TASK_STACK_SIZE    (12 * 1024)
@@ -105,13 +105,6 @@ static void example_lvgl_flush_cb(
         color_map);
 }
 
-// ★ КРИТИЧНО для SH8601: контроллер требует, чтобы область частичного
-// обновления была выровнена по чётным границам (данные шлются блоками по 2
-// пикселя из-за QSPI/внутренней адресации). Без этого LVGL9 присылает в
-// flush_cb произвольные (нечётные) прямоугольники при точечных обновлениях
-// (лейблы часов, шагомера и т.д.) - именно это и вызывает смазывание/
-// артефакты, которых нет в demo-примере производителя (там rounder был,
-// просто через LVGL8-style API).
 static void example_lvgl_rounder_cb(lv_event_t *e)
 {
     lv_area_t *area = lv_event_get_param(e);
@@ -237,15 +230,6 @@ void app_main(void) {
         return;
     }
 
-#if EXAMPLE_PIN_NUM_BK_LIGHT >= 0
-    ESP_LOGI(TAG, "Turn off LCD backlight");
-    gpio_config_t bk_gpio_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << EXAMPLE_PIN_NUM_BK_LIGHT
-    };
-    ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
-#endif
-
     ESP_LOGI(TAG, "Initialize SPI bus");
     const spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(
         EXAMPLE_PIN_NUM_LCD_PCLK,
@@ -287,11 +271,6 @@ void app_main(void) {
     I2C_master_Init();
 #if EXAMPLE_USE_TOUCH
     touch_Init();
-#endif
-
-#if EXAMPLE_PIN_NUM_BK_LIGHT >= 0
-    ESP_LOGI(TAG, "Turn on LCD backlight");
-    gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, 1);
 #endif
 
     ESP_LOGI(TAG, "Initialize LVGL 9");
@@ -345,11 +324,7 @@ void app_main(void) {
     // ═══════════════════════════════════════════════════════
     ESP_LOGI(TAG, "Display UI");
     if (example_lvgl_lock(-1)) {
-        app_ui_init(); // ★ было: ui_init(); home_tile_time_init();
-                       // app_ui_init() строит все экраны И запускает логику
-                       // каждого из них (часы/шагомер/лента уведомлений/
-                       // пульт/таймер/калькулятор и т.д.) - раньше логика
-                       // экранов (кроме времени) вообще не вызывалась.
+        app_ui_init(); 
         example_lvgl_unlock();
     }
     ESP_ERROR_CHECK(esp_event_handler_register(APP_EVENTS, EVT_BLE_SHOW_PIN, app_event_handler, NULL));

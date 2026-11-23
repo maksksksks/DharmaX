@@ -123,7 +123,7 @@ static void refresh_listing(void)
     DIR *dir = opendir(s_current_path);
     if (!dir) {
         lv_obj_remove_flag(lbl_empty_hint, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(lbl_empty_hint, "Карта не смонтирована\nили путь не найден");
+        lv_label_set_text(lbl_empty_hint, "not mounted or not founded");
         ESP_LOGW(TAG, "opendir(%s) failed", s_current_path);
         return;
     }
