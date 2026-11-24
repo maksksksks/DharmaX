@@ -4,6 +4,7 @@
 #include "ble_config.h"
 #include "ble_gatt.h"
 #include "ble_logs.h"
+#include "ble_power.h"
 #include "ble_state.h"
 
 #include "esp_log.h"
@@ -164,3 +165,5 @@ void svc_ble_sync_advertise_start(void) {
 }
 
 bool svc_ble_sync_is_advertising(void) { return ble_state.advertising; }
+
+void svc_ble_sync_activity(void) { ble_power_activity(); }

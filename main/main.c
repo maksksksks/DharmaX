@@ -8,6 +8,8 @@
 #include "driver/i2c.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
+#include "esp_pm.h"
+#include "sdkconfig.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_ops.h"
@@ -55,7 +57,10 @@ static lv_display_t *s_disp = NULL; // ★ нужен коллбэку заве�
 #define EXAMPLE_USE_TOUCH           1
 
 #define EXAMPLE_LVGL_BUF_HEIGHT     40
-#define EXAMPLE_LVGL_TICK_PERIOD_MS 5
+// ★ POWER: границы динамической частоты. 160 МГц хватает LVGL + QSPI-flush;
+// 40 МГц (XTAL) - в простое; без блокировок CPU уходит в light sleep.
+#define APP_CPU_MAX_MHZ             160
+#define APP_CPU_MIN_MHZ             40
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS  500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS  1
 #define EXAMPLE_LVGL_TASK_STACK_SIZE    (12 * 1024)
@@ -147,9 +152,12 @@ static void example_lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
 }
 #endif
 
-static void example_increase_lvgl_tick(void *arg)
+// ★ POWER: раньше LVGL-тик давал периодический esp_timer (200-500 пробуждений в секунду),
+// из-за чего CPU физически не мог уйти в light sleep. В LVGL 9 тик можно брать
+// "по запросу" через колбэк - таймер не нужен.
+static uint32_t example_lvgl_tick_get_cb(void)
 {
-    lv_tick_inc(EXAMPLE_LVGL_TICK_PERIOD_MS);
+    return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
 static bool example_lvgl_lock(int timeout_ms)
@@ -230,6 +238,24 @@ void app_main(void) {
         return;
     }
 
+#if CONFIG_PM_ENABLE
+    // ★ POWER: DFS + automatic light sleep. Если CONFIG_PM_ENABLE выключен в sdkconfig,
+    // этот блок не компилируется и ничего не меняется.
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz = APP_CPU_MAX_MHZ,
+        .min_freq_mhz = APP_CPU_MIN_MHZ,
+        .light_sleep_enable = true,
+    };
+    err = esp_pm_configure(&pm_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_pm_configure failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "PM: %d..%d MHz, light sleep ON", APP_CPU_MIN_MHZ, APP_CPU_MAX_MHZ);
+    }
+#else
+    ESP_LOGW(TAG, "CONFIG_PM_ENABLE=n: управление питанием НЕ включено (menuconfig -> Power Management)");
+#endif
+
     ESP_LOGI(TAG, "Initialize SPI bus");
     const spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(
         EXAMPLE_PIN_NUM_LCD_PCLK,
@@ -296,14 +322,8 @@ void app_main(void) {
     lv_indev_set_display(indev, disp);
 #endif
 
-    ESP_LOGI(TAG, "Install LVGL tick timer");
-    const esp_timer_create_args_t lvgl_tick_timer_args = {
-        .callback = &example_increase_lvgl_tick,
-        .name = "lvgl_tick"
-    };
-    esp_timer_handle_t lvgl_tick_timer = NULL;
-    ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, EXAMPLE_LVGL_TICK_PERIOD_MS * 1000));
+    // ★ POWER: тик без периодического таймера (см. example_lvgl_tick_get_cb)
+    lv_tick_set_cb(example_lvgl_tick_get_cb);
 
     lvgl_mux = xSemaphoreCreateMutex();
     assert(lvgl_mux);

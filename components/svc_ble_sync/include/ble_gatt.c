@@ -1,5 +1,6 @@
 #include "ble_gatt.h"
 #include "ble_state.h"
+#include "ble_power.h"
 #include "ble_notify_parser.h"
 #include "svc_ble_sync.h"
 
@@ -31,6 +32,7 @@ static int time_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return BLE_ATT_ERR_UNLIKELY;
     }
+    ble_power_activity();
 
     if (OS_MBUF_PKTLEN(ctxt->om) != 4) {
         ESP_LOGE(TAG, "Неверный размер пакета времени!");
@@ -56,6 +58,7 @@ static int notify_chr_access(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGW(TAG, "Попытка чтения характеристики уведомления");
         return BLE_ATT_ERR_UNLIKELY;
     }
+    ble_power_activity();   // телефон слал данные - вероятно, будет ещё (длинные JSON, пачка уведомлений)
 
     // Безопасно копируем данные из mbuf (учитывая фрагментацию NimBLE)
     uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
@@ -150,6 +153,8 @@ void send_action_to_phone(uint8_t action_code) {
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(&action_code, 1);
     if (om == NULL) return;
+
+    ble_power_activity();   // ждём ответ телефона на действие - быстрый профиль
 
     ble_gatts_notify_custom(ble_state.active_conn_handle, ble_state.action_chr_val_handle, om);
     ESP_LOGI(TAG, "Действие 0x%02X отправлено на телефон", action_code);

@@ -9,6 +9,7 @@ idf_component_register(
         "include/ble_notify_parser.c"
         "include/ble_bonds.c"
         "include/ble_config.c"
+        "include/ble_power.c"
 
     INCLUDE_DIRS
         "."
@@ -20,6 +21,7 @@ idf_component_register(
         freertos
         log
         esp_event
+        esp_timer
         bt
         app_core
         nvs_flash

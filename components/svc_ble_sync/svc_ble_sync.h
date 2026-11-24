@@ -22,3 +22,8 @@ void svc_ble_sync_stop(void);
 
 void send_action_to_phone(uint8_t action_code);
 void svc_ble_delete_all_peers(void);
+
+// Любая реальная активность обмена с телефоном: на ~4 с включает быстрый интервал
+// соединения, затем автоматически возвращает экономичный (400-500 мс).
+// Вызывайте перед отправкой телефону больших данных (телеметрия, шаги, логи).
+void svc_ble_sync_activity(void);

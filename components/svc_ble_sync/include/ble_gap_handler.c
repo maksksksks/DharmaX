@@ -2,6 +2,7 @@
 #include "ble_advertise.h"
 #include "ble_logs.h"
 #include "ble_state.h"
+#include "ble_power.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -41,21 +42,8 @@ static void on_connect(struct ble_gap_event *event) {
         ESP_LOGI(TAG, "📶 RSSI телефона при подключении: %d dBm", rssi);
     }
 
-    // Интервал соединения измеряется в 1.25 мс, timeout — в 10 мс
-    struct ble_gap_upd_params conn_params = {
-        .itvl_min = 0x30,            // 48 * 1.25 = 60 мс
-        .itvl_max = 0x50,            // 80 * 1.25 = 100 мс
-        .latency = 2,
-        .supervision_timeout = 400,  // 400 * 10 = 4 с
-        .min_ce_len = 0x000A,
-        .max_ce_len = 0x0020,
-    };
-    int rc = ble_gap_update_params(conn_handle, &conn_params);
-    if (rc == 0) {
-        ESP_LOGI(TAG, "✓ Параметры соединения обновлены (60-100 мс, latency=2, timeout=4 с)");
-    } else {
-        ESP_LOGW(TAG, "⚠ Не удалось обновить параметры: %d (0x%X)", rc, rc);
-    }
+    // ★ POWER: сопряжение и первый обмен - в быстром профиле, затем автоматически IDLE (400-500 мс)
+    ble_power_on_connect(conn_handle);
 
     if (!ble_state.bonds_loaded) {
         ESP_LOGW(TAG, "⚠ Подключение до загрузки ключей, ждём 100мс...");
@@ -86,6 +74,7 @@ static void on_disconnect(void) {
     ESP_LOGI(TAG, "Телефон отключен.");
     ble_state.active_conn_handle = 0;
     ble_state.log_subscribed = false;
+    ble_power_on_disconnect();
 
     esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
     svc_vibro_send_event(VIBRATION_EVENT_DOUBLE_LONG, LEVEL_HIGH, DURATION_DEFAULT);
@@ -98,6 +87,7 @@ static void on_disconnect(void) {
 // ==========================================
 
 static void on_enc_change(struct ble_gap_event *event) {
+    ble_power_activity();
     if (event->enc_change.status == 0) {
         ESP_LOGI(TAG, "✓ Шифрование установлено успешно");
         esp_event_post(APP_EVENTS, EVT_BLE_CLOSE_PIN, NULL, 0, pdMS_TO_TICKS(100));
@@ -122,6 +112,7 @@ static void on_subscribe(struct ble_gap_event *event) {
     if (event->subscribe.attr_handle != ble_state.log_chr_val_handle) return;
 
     ble_state.log_subscribed = (event->subscribe.cur_notify != 0);
+    if (ble_state.log_subscribed) ble_power_activity();   // поток логов идёт в быстром профиле
     ESP_LOGI(TAG, "📡 Log subscription: %s", ble_state.log_subscribed ? "✅ ENABLED" : "❌ DISABLED");
 
     if (!ble_state.log_subscribed && ble_state.log_queue != NULL) {
@@ -141,6 +132,7 @@ static void on_subscribe(struct ble_gap_event *event) {
 
 static void on_passkey(struct ble_gap_event *event) {
     ESP_LOGI(TAG, "PASSKEY_ACTION event");
+    ble_power_activity();   // ввод PIN: держим быстрый профиль, чтобы обмен SMP не тормозил
 
     if (event->passkey.params.action != BLE_SM_IOACT_DISP) return;
 
@@ -196,6 +188,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:     on_disconnect();        break;
     case BLE_GAP_EVENT_ENC_CHANGE:     on_enc_change(event);   break;
     case BLE_GAP_EVENT_SUBSCRIBE:      on_subscribe(event);    break;
+    case BLE_GAP_EVENT_CONN_UPDATE:    ble_power_on_conn_update(event->conn_update.conn_handle); break;
     case BLE_GAP_EVENT_PASSKEY_ACTION: on_passkey(event);      break;
     case BLE_GAP_EVENT_REPEAT_PAIRING: return on_repeat_pairing(event);
     default: break;

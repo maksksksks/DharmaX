@@ -6,6 +6,7 @@ idf_component_register(
             esp_lcd_sh8601 
             lvgl 
             esp_timer 
+            esp_pm
             driver
             i2c_bsp
             esp_touch

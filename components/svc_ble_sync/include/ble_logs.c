@@ -63,46 +63,22 @@ int parse_esp_log_line(const char *full_msg, ble_log_item_t *item) {
  * @brief Исправленный перехватчик (буферизация ДО использования args)
  */
 static int ble_log_hook_vprintf(const char *fmt, va_list args) {
-    // 1. Буферизируем сообщение
-    char full_msg[256];
+    // ★ POWER/CPU: раньше каждая строка лога форматировалась (vsnprintf на 256 Б) даже когда
+    // телефон не подписан на лог, плюс первые вызовы печатали отладочные printf.
+    // Теперь форматируем только если лог реально стримится.
+    const bool stream = ble_state.running && ble_state.log_subscribed && ble_state.log_queue != NULL;
+
     va_list args_copy;
-    va_copy(args_copy, args);
+    if (stream) va_copy(args_copy, args);
+
+    // Вывод в UART (потребляет args)
+    int ret = ble_state.original_vprintf ? ble_state.original_vprintf(fmt, args) : 0;
+
+    if (!stream) return ret;
+
+    char full_msg[256];
     vsnprintf(full_msg, sizeof(full_msg), fmt, args_copy);
     va_end(args_copy);
-
-    // 2. Вывод в UART
-    int ret = 0;
-    if (ble_state.original_vprintf) {
-        ret = ble_state.original_vprintf(fmt, args);
-    }
-
-    // ★ ОТЛАДКА: покажем, что хук вызван
-    static int hook_call_count = 0;
-    hook_call_count++;
-    if (hook_call_count <= 10) {  // Первые 10 вызовов
-        printf("[HOOK #%d] ble_state.running=%d, ble_state.log_subscribed=%d, queue=%p\n", 
-               hook_call_count, ble_state.running, ble_state.log_subscribed, ble_state.log_queue);
-    }
-
-    // 3. Проверки
-    if (!ble_state.running) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: ble_state.running=false\n");
-        }
-        return ret;
-    }
-    if (!ble_state.log_subscribed) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: ble_state.log_subscribed=false\n");
-        }
-        return ret;
-    }
-    if (ble_state.log_queue == NULL) {
-        if (hook_call_count <= 5) {
-            printf("[HOOK] SKIP: ble_state.log_queue=NULL\n");
-        }
-        return ret;
-    }
 
     // 4. Парсим строку
     ble_log_item_t *item = malloc(sizeof(ble_log_item_t));
@@ -147,8 +123,9 @@ static void ble_log_sender_task(void *param) {
     uint8_t tx_buffer[240];  // С запасом под MTU=247
 
     while (1) {
-        // Ждём элемент из очереди (с таймаутом для периодических проверок)
-        if (xQueueReceive(ble_state.log_queue, &item, pdMS_TO_TICKS(50)) == pdTRUE && item) {
+        // ★ POWER: блокируемся до появления лога. Раньше просыпались каждые 50 мс (20 Гц)
+        // даже когда логов нет, и это не давало CPU уйти в light sleep.
+        if (xQueueReceive(ble_state.log_queue, &item, portMAX_DELAY) == pdTRUE && item) {
             
             // Проверяем актуальность подключения
             if (!ble_state.log_subscribed || ble_state.active_conn_handle == 0) {
