@@ -3,6 +3,7 @@
 // скроллируемый список кнопок-строк (на экран помещается ~6 штук).
 
 #include "ui.h"
+#include "app_nav.h"
 #include "screen_ir_logic.h"
 
 lv_obj_t * ui_ScreenIR = NULL;
@@ -15,7 +16,7 @@ void ui_event_ScreenIR(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if (event_code == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSys_full_init);
+nav_replace_ex("sys", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
 }
 }
 
@@ -30,8 +31,12 @@ typedef struct {
 
 static void remote_row_event_cb(lv_event_t * e)
 {
-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     ir_btn_user_data_t * ud = (ir_btn_user_data_t *)lv_event_get_user_data(e);
+    if (lv_event_get_code(e) == LV_EVENT_DELETE) {   // экран пересоздаётся: чистим за собой
+        lv_free(ud);
+        return;
+    }
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     screen_ir_handle_button(ud->device, ud->cmd);
 }
 
@@ -50,7 +55,7 @@ static void make_remote_row(lv_obj_t * parent, const char * symbol, const char *
     ir_btn_user_data_t * ud = lv_malloc(sizeof(ir_btn_user_data_t));
     ud->device = device;
     ud->cmd = cmd;
-    lv_obj_add_event_cb(row, remote_row_event_cb, LV_EVENT_CLICKED, ud);
+    lv_obj_add_event_cb(row, remote_row_event_cb, LV_EVENT_ALL, ud);
 
     lv_obj_t * lbl_icon = lv_label_create(row);
     lv_label_set_text(lbl_icon, symbol);

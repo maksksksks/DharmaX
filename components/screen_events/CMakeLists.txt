@@ -9,5 +9,6 @@ idf_component_register(
         app_core
         ui_resources
         ui
+        app_nav
         ui_widgets
 )

@@ -15,6 +15,7 @@ static const char *TAG = "SCREEN_SETTINGS";
 static lv_obj_t *sw_auto_brightness, *sw_screen_sleep, *sw_battery_monitor, *sw_lighting_monitor, *sw_ble_sync;
 static lv_obj_t *lbl_status_auto_brightness, *lbl_status_screen_sleep, *lbl_status_battery, *lbl_status_lighting, *lbl_status_ble;
 static lv_obj_t *scroll_container;
+static lv_timer_t *s_ble_check_timer = NULL;
 
 // =========================================================
 // CALLBACK-и тумблеров
@@ -88,7 +89,8 @@ static void ble_check_timer_cb(lv_timer_t *timer)
 {
     if (svc_ble_sync_is_advertising()) set_status_label(lbl_status_ble, true, "ADV");
     else if (svc_ble_sync_is_running()) set_status_label(lbl_status_ble, true, "ON");
-    lv_timer_del(timer);
+    lv_timer_delete(timer);
+    s_ble_check_timer = NULL;   // одноразовый таймер, удаляет сам себя
 }
 
 static void delete_keys_btn_cb(lv_event_t *e)
@@ -211,21 +213,38 @@ static void apply_initial_state(void)
 
     if (svc_ble_sync_is_running()) {
         lv_obj_add_state(sw_ble_sync, LV_STATE_CHECKED);
-        lv_timer_create(ble_check_timer_cb, 2000, NULL);
+        s_ble_check_timer = lv_timer_create(ble_check_timer_cb, 2000, NULL);
     } else {
         set_status_label(lbl_status_ble, false, "OFF");
     }
 }
 
-void screen_settings_logic_init(void)
+static void logic_init(void)
 {
     build_ui();
     apply_initial_state();
     ESP_LOGI(TAG, "Settings screen logic initialized (перенесено со старой платы)");
 }
 
-void ui_ScreenSettings_full_init(void)
+static void logic_deinit(void)
+{
+    if (s_ble_check_timer) { lv_timer_delete(s_ble_check_timer); s_ble_check_timer = NULL; }
+    sw_auto_brightness = sw_screen_sleep = sw_battery_monitor = sw_lighting_monitor = sw_ble_sync = NULL;
+    lbl_status_auto_brightness = lbl_status_screen_sleep = lbl_status_battery = NULL;
+    lbl_status_lighting = lbl_status_ble = NULL;
+    scroll_container = NULL;
+}
+
+lv_obj_t *screen_settings_create(void)
 {
     ui_ScreenSettings_screen_init();
-    screen_settings_logic_init();
+    logic_init();
+    return ui_ScreenSettings;
+}
+
+void screen_settings_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSettings
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenSettings_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

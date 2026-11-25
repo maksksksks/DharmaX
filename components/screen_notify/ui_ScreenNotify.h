@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenNotify
 extern void ui_ScreenNotify_screen_init(void);
 extern void ui_ScreenNotify_screen_destroy(void);
-extern void ui_ScreenNotify_full_init(void);
 extern void ui_event_ScreenNotify(lv_event_t * e);
 extern lv_obj_t * ui_ScreenNotify;
 extern lv_obj_t * ui_Label8;

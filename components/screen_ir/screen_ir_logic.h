@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "lvgl.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,14 +37,13 @@ IR_CMD_EXTRA_8,
 IR_CMD_COUNT,
 } ir_cmd_id_t;
 
-// Инициализация: поднимает RMT TX (см. svc_ir_transmit) на заданном GPIO.
-void screen_ir_logic_init(void);
+// Дескриптор для app_nav: { "ir", screen_ir_create, screen_ir_destroy }.
+// create() при первом вызове поднимает RMT TX (см. svc_ir_transmit) на IR_TX_GPIO.
+lv_obj_t *screen_ir_create(void);
+void screen_ir_destroy(lv_obj_t *scr);
 
 // Вызывается из ui_ScreenIR.c по клику на кнопку.
 void screen_ir_handle_button(ir_device_t device, ir_cmd_id_t cmd);
-
-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
-void ui_ScreenIR_full_init(void);
 
 #ifdef __cplusplus
 } /*extern "C"*/

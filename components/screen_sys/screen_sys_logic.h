@@ -1,16 +1,18 @@
 #pragma once
+
+#include "lvgl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-/**
-* Инициализация логики экрана "ScreenSys".
-* Вызывается один раз из main после ui_init() (когда ui_ScreenSys уже создан).
-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
-*/
-void screen_sys_logic_init(void);
 
-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
-void ui_ScreenSys_full_init(void);
+// Дескриптор для app_nav: { "sys", screen_sys_create, screen_sys_destroy }.
+//
+// create():  строит дерево ui_ScreenSys, достраивает логику, подписывается на события.
+// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
+//            виджеты и удаляет сам экран. Вызывается только навигатором.
+lv_obj_t *screen_sys_create(void);
+void screen_sys_destroy(lv_obj_t *scr);
 
 #ifdef __cplusplus
 } /*extern "C"*/

@@ -19,8 +19,10 @@ void show_pairing_popup(const char *code)
     s_popup_open = true;
     if (s_popup_bg != NULL) return; // уже открыт
 
-    // Затемняющий фон поверх активного экрана
-    s_popup_bg = lv_obj_create(lv_screen_active());
+    // Затемняющий фон поверх ЛЮБОГО экрана. Родитель - lv_layer_top(), а не
+    // lv_screen_active(): экран под попапом теперь могут уничтожить (app_nav),
+    // и s_popup_bg повис бы на удалённом объекте.
+    s_popup_bg = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_popup_bg);
     lv_obj_set_size(s_popup_bg, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(s_popup_bg, lv_color_hex(0x000000), 0);

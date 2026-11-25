@@ -1,16 +1,18 @@
 #pragma once
+
+#include "lvgl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-/**
-* Инициализация логики экрана "ScreenCalendar".
-* Вызывается один раз из main после ui_init() (когда ui_ScreenCalendar уже создан).
-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
-*/
-void screen_calendar_logic_init(void);
 
-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
-void ui_ScreenCalendar_full_init(void);
+// Дескриптор для app_nav: { "calendar", screen_calendar_create, screen_calendar_destroy }.
+//
+// create():  строит дерево ui_ScreenCalendar, достраивает логику, подписывается на события.
+// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
+//            виджеты и удаляет сам экран. Вызывается только навигатором.
+lv_obj_t *screen_calendar_create(void);
+void screen_calendar_destroy(lv_obj_t *scr);
 
 #ifdef __cplusplus
 } /*extern "C"*/

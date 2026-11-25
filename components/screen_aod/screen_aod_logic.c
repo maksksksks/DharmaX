@@ -1,5 +1,6 @@
 #include "screen_aod_logic.h"
 #include "ui.h"
+#include "app_nav.h"
 #include "app_events.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -12,12 +13,14 @@ static const char *TAG = "SCREEN_AOD";
 #define CX  (EXAMPLE_LCD_H_RES / 2)
 #define CY  (EXAMPLE_LCD_V_RES / 2)
 
-static lv_obj_t *s_prev_screen = NULL;
 static lv_timer_t *s_tick_timer = NULL;
-static bool s_in_aod = false;
+static bool s_in_aod = false;                       // "хотим быть в AOD" (учитывает отложенные переходы nav)
+static app_evt_sub_t s_sub_sleep, s_sub_raise;      // триггеры входа/выхода, живут весь uptime
 
 static void aod_update_hands(void)
 {
+    if (ui_AodHourHand == NULL) return;             // экрана сейчас нет
+
     time_t now;
     struct tm tm_now;
     time(&now);
@@ -48,41 +51,52 @@ static void aod_tick_timer_cb(lv_timer_t *timer)
     aod_update_hands();
 }
 
+// ---------------------------------------------------------
+// Жизненный цикл экрана (для app_nav)
+// ---------------------------------------------------------
+lv_obj_t *screen_aod_create(void)
+{
+    ui_ScreenAOD_screen_init();
+    aod_update_hands();
+    // Таймер существует только пока существует экран: в остальное время AOD не тратит CPU.
+    s_tick_timer = lv_timer_create(aod_tick_timer_cb, 1000, NULL);
+    return ui_ScreenAOD;
+}
+
+void screen_aod_destroy(lv_obj_t *scr)
+{
+    (void)scr;
+    if (s_tick_timer) { lv_timer_delete(s_tick_timer); s_tick_timer = NULL; }
+    ui_ScreenAOD_screen_destroy();                  // lv_obj_del + обнуление ui_Aod*
+}
+
+// ---------------------------------------------------------
+// Вход / выход: AOD - оверлей поверх стека навигатора.
+// push оставляет текущий экран жить (его вернёт pop), так что таймер
+// обратного отсчёта, SD-путь и т.п. не теряются, пока часы "спят".
+// ---------------------------------------------------------
 void screen_aod_enter(void)
 {
     if (s_in_aod) return;
-
-    s_prev_screen = lv_screen_active();
-    if (s_prev_screen == ui_ScreenAOD) s_prev_screen = ui_ScreenHome;
-
-    if (ui_ScreenAOD == NULL) ui_ScreenAOD_screen_init();
-
-    aod_update_hands();
-    lv_screen_load_anim(ui_ScreenAOD, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
-
-    if (s_tick_timer == NULL)
-        s_tick_timer = lv_timer_create(aod_tick_timer_cb, 1000, NULL);
-
     s_in_aod = true;
+    nav_push_ex("aod", LV_SCR_LOAD_ANIM_FADE_ON, 200);
     ESP_LOGI(TAG, "Entered AOD watchface");
 }
 
 void screen_aod_exit(void)
 {
     if (!s_in_aod) return;
-
-    if (s_tick_timer != NULL) {
-        lv_timer_del(s_tick_timer);
-        s_tick_timer = NULL;
-    }
-
-    lv_obj_t *target = (s_prev_screen != NULL) ? s_prev_screen : ui_ScreenHome;
-    if (target == ui_ScreenHome && ui_ScreenHome == NULL)
-        ui_ScreenHome_screen_init();
-    lv_screen_load_anim(target, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
-
     s_in_aod = false;
+    nav_pop_ex(LV_SCR_LOAD_ANIM_FADE_ON, 200);
     ESP_LOGI(TAG, "Exited AOD watchface");
+}
+
+void screen_aod_exit_to_home(void)
+{
+    if (!s_in_aod) return;
+    s_in_aod = false;
+    nav_back_to_home_ex(LV_SCR_LOAD_ANIM_FADE_ON, 200);
+    ESP_LOGI(TAG, "Exited AOD watchface -> home");
 }
 
 static void wrist_sleep_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
@@ -97,9 +111,10 @@ static void wrist_raise_handler(void *arg, esp_event_base_t base, int32_t id, vo
     screen_aod_exit();
 }
 
+// Постоянные триггеры (не принадлежат экрану, поэтому destroy() их не снимает).
 void screen_aod_logic_init(void)
 {
-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL, NULL);
-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL, NULL);
-    ESP_LOGI(TAG, "AOD logic initialized");
+    app_evt_subscribe(&s_sub_sleep, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL);
+    app_evt_subscribe(&s_sub_raise, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL);
+    ESP_LOGI(TAG, "AOD triggers armed");
 }

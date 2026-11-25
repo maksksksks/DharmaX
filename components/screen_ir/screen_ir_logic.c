@@ -19,9 +19,16 @@ typedef struct {
 // Таблица [устройство][команда].
 static nec_code_t s_code_table[IR_DEVICE_COUNT][IR_CMD_COUNT] = {0};
 
-void screen_ir_logic_init(void)
+static bool s_ir_ready = false;
+
+static void logic_init(void)
 {
-    svc_ir_transmit_init(IR_TX_GPIO);
+    // RMT-канал у svc_ir_transmit поднимается один раз на весь uptime
+    // (повторный init сервис отвергает), поэтому экран его не трогает при пересоздании.
+    if (!s_ir_ready) {
+        svc_ir_transmit_init(IR_TX_GPIO);
+        s_ir_ready = true;
+    }
     ESP_LOGI(TAG, "IR remote screen logic initialized on GPIO%d", IR_TX_GPIO);
 }
 
@@ -36,8 +43,21 @@ void screen_ir_handle_button(ir_device_t device, ir_cmd_id_t cmd)
     svc_ir_send_nec(code->address, code->command);
 }
 
-void ui_ScreenIR_full_init(void)
+static void logic_deinit(void)
+{
+    // у экрана нет подписок и таймеров; RMT-канал сервиса живёт вместе с приложением
+}
+
+lv_obj_t *screen_ir_create(void)
 {
     ui_ScreenIR_screen_init();
-    screen_ir_logic_init();
+    logic_init();
+    return ui_ScreenIR;
+}
+
+void screen_ir_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenIR
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenIR_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

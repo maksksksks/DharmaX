@@ -12,7 +12,6 @@ extern "C" {
 // SCREEN: ui_ScreenIR
 extern void ui_ScreenIR_screen_init(void);
 extern void ui_ScreenIR_screen_destroy(void);
-extern void ui_ScreenIR_full_init(void);
 extern void ui_event_ScreenIR(lv_event_t * e);
 extern lv_obj_t * ui_ScreenIR;
 extern lv_obj_t * ui_IRTabView;

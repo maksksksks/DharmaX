@@ -349,15 +349,44 @@ static void build_stopwatch_tab(void)
     sw_set_buttons_idle();
 }
 
-void screen_timeutils_logic_init(void)
+static void logic_init(void)
 {
     build_timer_tab();
     build_stopwatch_tab();
     ESP_LOGI(TAG, "TimeUtils screen logic initialized");
 }
 
-void ui_ScreenTimeUtils_full_init(void)
+static void logic_deinit(void)
+{
+    if (timer_tick) { lv_timer_delete(timer_tick); timer_tick = NULL; }
+    if (sw_tick)    { lv_timer_delete(sw_tick);    sw_tick = NULL; }
+
+    // Состояние живёт ровно столько же, сколько экран: уходим - таймер и
+    // секундомер сбрасываются (иначе виджеты после пересоздания не совпали бы с ним).
+    timer_remaining_sec = 0;
+    sw_state = SW_IDLE;
+    sw_start_us = 0;
+    sw_accumulated_us = 0;
+    sw_lap_count = 0;
+
+    roller_h = roller_m = roller_s = NULL;
+    timer_setup_row = timer_countdown_label = timer_btn_row = NULL;
+    timer_start_btn = timer_cancel_btn = NULL;
+    sw_lbl_hhmm = sw_lbl_ssms = NULL;
+    sw_btn_left = sw_btn_right = NULL;
+    sw_laps_list = NULL;
+}
+
+lv_obj_t *screen_timeutils_create(void)
 {
     ui_ScreenTimeUtils_screen_init();
-    screen_timeutils_logic_init();
+    logic_init();
+    return ui_ScreenTimeUtils;
+}
+
+void screen_timeutils_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenTimeUtils
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenTimeUtils_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

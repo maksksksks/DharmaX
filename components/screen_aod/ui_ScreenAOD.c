@@ -1,4 +1,7 @@
 #include "ui.h"
+#include "app_nav.h"
+#include "screen_aod_logic.h"
+#include "svc_screen_sleep.h"
 #include <math.h>
 
 lv_obj_t * ui_ScreenAOD = NULL;
@@ -45,9 +48,10 @@ void ui_event_ScreenAOD(lv_event_t * e)
         if (event_code == LV_EVENT_GESTURE) {
             lv_indev_wait_release(lv_indev_active());
         }
-        extern void svc_screen_sleep_wake_up(void);
+        // Касание по AOD всегда ведёт на home (как и раньше): сначала уходим
+        // из AOD на home, потом будим экран (wake_up видит, что AOD уже закрыт).
+        screen_aod_exit_to_home();
         svc_screen_sleep_wake_up();
-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, &ui_ScreenHome_screen_init);
     }
 }
 

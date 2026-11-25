@@ -4,6 +4,7 @@
 // Project name: DharmaXĶ
 
 #include "ui.h"
+#include "app_nav.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_26_cyrillic) 
 
@@ -22,19 +23,19 @@ void ui_event_ScreenHome(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenWeather_full_init);
+nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenNotify, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenNotify_full_init);
+nav_replace_ex("notify", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenPhone_full_init);
+nav_replace_ex("phone", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalendar_full_init);
+nav_replace_ex("calendar", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
 }
 }
 

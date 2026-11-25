@@ -9,6 +9,7 @@ idf_component_register(
         app_core
         ui_resources
         ui
+        app_nav
         esp_event
         svc_screen_sleep
 )

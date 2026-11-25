@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenNews
 extern void ui_ScreenNews_screen_init(void);
 extern void ui_ScreenNews_screen_destroy(void);
-extern void ui_ScreenNews_full_init(void);
 extern void ui_event_ScreenNews(lv_event_t * e);
 extern lv_obj_t * ui_ScreenNews;
 extern lv_obj_t * ui_Label16;

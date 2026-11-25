@@ -8,9 +8,6 @@
 
 ///////////////////// VARIABLES ////////////////////
 
-// EVENTS
-lv_obj_t * ui____initial_actions0;
-
 // IMAGES AND IMAGE SETS
 
 ///////////////////// TEST LVGL SETTINGS ////////////////////
@@ -22,51 +19,15 @@ lv_obj_t * ui____initial_actions0;
 
 ///////////////////// FUNCTIONS ////////////////////
 
-///////////////////// SCREENS ////////////////////
+///////////////////// INIT ////////////////////
 
+// Экраны больше не строятся здесь: их создаёт и уничтожает app_nav (см.
+// app_ui.c - таблица дескрипторов и nav_push("home")). Остаётся только то,
+// что относится ко всему дисплею, - тема.
 void ui_init(void)
 {
     lv_disp_t * dispp = lv_display_get_default();
     lv_theme_t * theme = lv_theme_default_init(dispp, lv_color_hex(UI_COLOR_ACCENT), lv_color_hex(UI_COLOR_ACCENT_DIM),
                                                true, LV_FONT_DEFAULT);
     lv_disp_set_theme(dispp, theme);
-    ui_ScreenHome_screen_init();
-    // ui_ScreenNotify_screen_init();
-    // ui_ScreenPhone_screen_init();
-    // ui_ScreenTimeUtils_screen_init();
-    // ui_ScreenCalc_screen_init();
-    // ui_ScreenWeather_screen_init();
-    // ui_ScreenSD_screen_init();
-    // ui_ScreenCalendar_screen_init();
-    // ui_ScreenSettings_screen_init();
-    // ui_ScreenSystem_screen_init();
-    // ui_ScreenWeatherDetails_screen_init();
-    ui_ScreenNews_screen_init();
-    // ui_ScreenEvents_screen_init();
-    // ui_ScreenSys_screen_init();
-    // ui_ScreenIR_screen_init();
-    // ui_ScreenAOD_screen_init();
-    ui____initial_actions0 = lv_obj_create(NULL);
-    lv_disp_load_scr(ui_ScreenHome);
 }
-
-void ui_destroy(void)
-{
-    ui_ScreenHome_screen_destroy();
-    ui_ScreenNotify_screen_destroy();
-    ui_ScreenPhone_screen_destroy();
-    ui_ScreenTimeUtils_screen_destroy();
-    ui_ScreenCalc_screen_destroy();
-    ui_ScreenWeather_screen_destroy();
-    ui_ScreenSD_screen_destroy();
-    ui_ScreenCalendar_screen_destroy();
-    ui_ScreenSettings_screen_destroy();
-    ui_ScreenSystem_screen_destroy();
-    ui_ScreenWeatherDetails_screen_destroy();
-    ui_ScreenNews_screen_destroy();
-    ui_ScreenEvents_screen_destroy();
-    ui_ScreenSys_screen_destroy();
-    ui_ScreenIR_screen_destroy();
-    ui_ScreenAOD_screen_destroy();
-}
-

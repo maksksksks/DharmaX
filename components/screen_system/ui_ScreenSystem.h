@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenSystem
 extern void ui_ScreenSystem_screen_init(void);
 extern void ui_ScreenSystem_screen_destroy(void);
-extern void ui_ScreenSystem_full_init(void);
 extern void ui_event_ScreenSystem(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSystem;
 extern lv_obj_t * ui_Label15;

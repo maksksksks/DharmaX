@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenCalendar
 extern void ui_ScreenCalendar_screen_init(void);
 extern void ui_ScreenCalendar_screen_destroy(void);
-extern void ui_ScreenCalendar_full_init(void);
 extern void ui_event_ScreenCalendar(lv_event_t * e);
 extern lv_obj_t * ui_ScreenCalendar;
 extern lv_obj_t * ui_Calendar;

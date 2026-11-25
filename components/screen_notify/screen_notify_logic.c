@@ -9,7 +9,8 @@
 #include <string.h>
 
 static const char *TAG = "SCREEN_NOTIFY";
-static card_feed_t s_feed;
+static card_feed_t s_feed = NULL;   // переживает экран (см. screen_notify_service_init)
+static app_evt_sub_t s_sub_rx, s_sub_del;
 
 static void apply_theme(void)
 {
@@ -17,15 +18,10 @@ static void apply_theme(void)
     lv_obj_set_y(ui_Label8, -210); // поднимаем заголовок, освобождая место под ленту
 }
 
-void ui_ScreenNotify_full_init(void)
-{
-    ui_ScreenNotify_screen_init();
-    screen_notify_logic_init();
-}
-
 static void build_feed(void)
 {
-    s_feed = card_feed_create(ui_ScreenNotify, 600000); // автоудаление через 10 минут
+    // Лента живёт дольше экрана, здесь её только подключаем к свежему экрану.
+    card_feed_attach(s_feed, ui_ScreenNotify);
     lv_obj_t *container = card_feed_get_container(s_feed);
     lv_obj_set_size(container, lv_pct(100), lv_pct(78));
     lv_obj_set_align(container, LV_ALIGN_BOTTOM_MID);
@@ -48,6 +44,7 @@ static void notify_to_card(const notify_data *n, card_feed_item_t *out, char *ti
 
 static void ble_notify_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
+    if (s_feed == NULL) return;
     (void)arg; (void)base;
     if (id == EVT_BLE_NOTIFY_RX) {
         notify_data *n = (notify_data *)event_data;
@@ -62,13 +59,40 @@ static void ble_notify_event_handler(void *arg, esp_event_base_t base, int32_t i
     }
 }
 
-void screen_notify_logic_init(void)
+// Сборщик данных: вызывается один раз при старте приложения (app_ui_init) и
+// принимает уведомления и когда экрана нет. Это слой данных, а не подписка экрана,
+// поэтому destroy() его не трогает. Идемпотентна.
+void screen_notify_service_init(void)
 {
+    if (s_feed != NULL) return;
+    s_feed = card_feed_create_detached(600000);
+    app_evt_subscribe(&s_sub_rx, EVT_BLE_NOTIFY_RX, ble_notify_event_handler, NULL);
+    app_evt_subscribe(&s_sub_del, EVT_BLE_NOTIFY_DEL, ble_notify_event_handler, NULL);
+}
+
+static void logic_init(void)
+{
+    screen_notify_service_init();   // на случай, если экран создали раньше сервиса
     apply_theme();
     build_feed();
-
-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_RX, ble_notify_event_handler, NULL, NULL);
-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_DEL, ble_notify_event_handler, NULL, NULL);
-
     ESP_LOGI(TAG, "Notify screen logic initialized");
+}
+
+static void logic_deinit(void)
+{
+    card_feed_detach(s_feed);   // лента (и её карточки) остаётся жить в скрытом контейнере
+}
+
+lv_obj_t *screen_notify_create(void)
+{
+    ui_ScreenNotify_screen_init();
+    logic_init();
+    return ui_ScreenNotify;
+}
+
+void screen_notify_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenNotify
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenNotify_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

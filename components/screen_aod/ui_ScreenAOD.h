@@ -7,7 +7,6 @@ extern "C" {
 
 extern void ui_ScreenAOD_screen_init(void);
 extern void ui_ScreenAOD_screen_destroy(void);
-extern void ui_ScreenAOD_full_init(void);
 extern void ui_event_ScreenAOD(lv_event_t * e);
 
 extern lv_obj_t * ui_ScreenAOD;

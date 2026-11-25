@@ -16,6 +16,7 @@ static lv_obj_t *bar_progress;
 static lv_obj_t *lbl_time_elapsed, *lbl_time_total;
 
 static bool s_is_playing = false;
+static app_evt_sub_t s_sub_media;
 
 static void format_mmss(uint32_t seconds, char *buf, size_t buf_sz)
 {
@@ -126,6 +127,7 @@ static void build_player_ui(void)
 static void media_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)arg; (void)base; (void)id;
+    if (lbl_title == NULL) return;
     media_data_t *m = (media_data_t *)event_data;
 
     lv_label_set_text(lbl_title, m->title[0] ? m->title : "No media");
@@ -147,15 +149,34 @@ static void media_event_handler(void *arg, esp_event_base_t base, int32_t id, vo
     lv_bar_set_value(bar_progress, progress, LV_ANIM_ON);
 }
 
-void screen_phone_logic_init(void)
+static void logic_init(void)
 {
     build_player_ui();
-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_MEDIA_UPDATED, media_event_handler, NULL, NULL);
+    app_evt_subscribe(&s_sub_media, EVT_BLE_MEDIA_UPDATED, media_event_handler, NULL);
     ESP_LOGI(TAG, "Phone (player) screen logic initialized");
 }
 
-void ui_ScreenPhone_full_init(void)
+static void logic_deinit(void)
+{
+    app_evt_unsubscribe(&s_sub_media);
+    s_is_playing = false;
+    lbl_title = lbl_artist = NULL;
+    btn_prev = btn_play = btn_next = NULL;
+    lbl_play_icon = NULL;
+    bar_progress = NULL;
+    lbl_time_elapsed = lbl_time_total = NULL;
+}
+
+lv_obj_t *screen_phone_create(void)
 {
     ui_ScreenPhone_screen_init();
-    screen_phone_logic_init();
+    logic_init();
+    return ui_ScreenPhone;
+}
+
+void screen_phone_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenPhone
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenPhone_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

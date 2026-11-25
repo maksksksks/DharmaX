@@ -1,5 +1,6 @@
 #include "screen_home_logic.h"
 #include "ui.h"
+#include "app_nav.h"
 #include "app_events.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -11,10 +12,15 @@
 static const char *TAG = "SCREEN_HOME";
 
 // --- Виджет шагомера, который мы достраиваем внутри ui_Panel1 ---
-static lv_obj_t *ui_HomeArcSteps;
-static lv_obj_t *ui_HomeLabelSteps;
+static lv_obj_t *ui_HomeArcSteps = NULL;
+static lv_obj_t *ui_HomeLabelSteps = NULL;
 
 #define STEPS_GOAL 10000
+
+// Всё, что home держит снаружи дерева виджетов. Home резидентный, но
+// destroy() симметричен create() (нужен тестам и возможному shutdown).
+static lv_timer_t *s_clock_timer;
+static app_evt_sub_t s_sub_battery, s_sub_steps, s_sub_raise, s_sub_sleep;
 
 // =========================================================
 // ДАТА / ВРЕМЯ (перенесено из старого home_tile.c)
@@ -162,6 +168,7 @@ static void build_pedometer_widget(void)
 static void battery_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)arg; (void)base; (void)id;
+    if (ui_Label3 == NULL) return;
     battery_data_t *bat = (battery_data_t *)event_data;
     char buf[24];
     snprintf(buf, sizeof(buf), "%d%%\n%.2fV", bat->percent, bat->voltage);
@@ -171,7 +178,7 @@ static void battery_event_handler(void *arg, esp_event_base_t base, int32_t id, 
 static void step_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)arg; (void)base; (void)id;
-    if (ui_HomeLabelSteps == NULL || !lv_obj_is_valid(ui_HomeLabelSteps)) return;
+    if (ui_HomeLabelSteps == NULL) return;
 
     motion_step_data_t *data = (motion_step_data_t *)event_data;
     uint32_t steps = data->steps;
@@ -199,17 +206,60 @@ static void wrist_sleep_handler(void *arg, esp_event_base_t base, int32_t id, vo
 // =========================================================
 // ИНИЦИАЛИЗАЦИЯ
 // =========================================================
-void screen_home_logic_init(void)
+// Пока home закрыт другим экраном, секундный таймер ему не нужен: ставим на
+// паузу (экономия пробуждений CPU), при возврате - сразу обновляем часы.
+static void home_visibility_cb(lv_event_t *e)
+{
+    if (s_clock_timer == NULL) return;
+    if (lv_event_get_code(e) == LV_EVENT_SCREEN_LOADED) {
+        update_clock_labels();
+        lv_timer_resume(s_clock_timer);
+    } else {
+        lv_timer_pause(s_clock_timer);
+    }
+}
+
+static void logic_init(void)
 {
     apply_theme();
     build_pedometer_widget();
     update_clock_labels();
-    lv_timer_create(clock_timer_cb, 1000, NULL);
+    s_clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
+    lv_obj_add_event_cb(ui_ScreenHome, home_visibility_cb, LV_EVENT_SCREEN_LOADED, NULL);
+    lv_obj_add_event_cb(ui_ScreenHome, home_visibility_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 
-    esp_event_handler_instance_register(APP_EVENTS, EVT_BATTERY_UPDATED, battery_event_handler, NULL, NULL);
-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_STEP_UPDATED, step_event_handler, NULL, NULL);
-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL, NULL);
-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL, NULL);
+    app_evt_subscribe(&s_sub_battery, EVT_BATTERY_UPDATED, battery_event_handler, NULL);
+    app_evt_subscribe(&s_sub_steps, EVT_MOTION_STEP_UPDATED, step_event_handler, NULL);
+    app_evt_subscribe(&s_sub_raise, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL);
+    app_evt_subscribe(&s_sub_sleep, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL);
 
     ESP_LOGI(TAG, "Home screen logic initialized");
+}
+
+static void logic_deinit(void)
+{
+    // 1) подписки: после возврата ни один обработчик не работает и не стартует
+    app_evt_unsubscribe(&s_sub_battery);
+    app_evt_unsubscribe(&s_sub_steps);
+    app_evt_unsubscribe(&s_sub_raise);
+    app_evt_unsubscribe(&s_sub_sleep);
+    // 2) таймеры
+    if (s_clock_timer) { lv_timer_delete(s_clock_timer); s_clock_timer = NULL; }
+    // 3) указатели на виджеты, которые мы достраивали (остальные обнулит ui_*_screen_destroy)
+    ui_HomeArcSteps = NULL;
+    ui_HomeLabelSteps = NULL;
+}
+
+lv_obj_t *screen_home_create(void)
+{
+    ui_ScreenHome_screen_init();
+    logic_init();
+    return ui_ScreenHome;
+}
+
+void screen_home_destroy(lv_obj_t *scr)
+{
+    (void)scr;
+    logic_deinit();
+    ui_ScreenHome_screen_destroy();   // lv_obj_del + обнуление ui_Label*/ui_Panel1
 }

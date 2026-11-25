@@ -4,6 +4,7 @@
 // Project name: DharmaXĶ
 
 #include "ui.h"
+#include "app_nav.h"
 
 lv_obj_t * ui_ScreenCalendar = NULL;
 lv_obj_t * ui_Calendar = NULL;
@@ -15,15 +16,15 @@ void ui_event_ScreenCalendar(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenHome_screen_init);
+nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalc_full_init);
+nav_replace_ex("calc", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenEvents, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenEvents_full_init);
+nav_replace_ex("events", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
 }
 }
 

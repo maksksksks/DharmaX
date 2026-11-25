@@ -9,6 +9,7 @@ idf_component_register(
         app_core
         ui_resources
         ui
+        app_nav
         svc_battery_monitor
         svc_ble_sync
         svc_lighting_monitor

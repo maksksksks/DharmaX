@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenPhone
 extern void ui_ScreenPhone_screen_init(void);
 extern void ui_ScreenPhone_screen_destroy(void);
-extern void ui_ScreenPhone_full_init(void);
 extern void ui_event_ScreenPhone(lv_event_t * e);
 extern lv_obj_t * ui_ScreenPhone;
 extern lv_obj_t * ui_Label9;

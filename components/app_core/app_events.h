@@ -121,3 +121,23 @@ typedef struct {
     bool charging;
     char carrier[16];        // имя оператора, может быть ""
 } phone_status_data_t;
+
+// ---------------------------------------------------------------------------
+// Подписка с запоминанием instance-хендла. Экраны (app_nav) хранят такие
+// записи у себя и в destroy() вызывают app_evt_unsubscribe() - это и есть
+// "снять ВСЕ esp_event_handler_instance_unregister".
+// ---------------------------------------------------------------------------
+typedef struct {
+    int32_t id;
+    esp_event_handler_instance_t inst;   // NULL = не подписан
+} app_evt_sub_t;
+
+// Подписывает cb на (APP_EVENTS, id). Повторный вызов на уже активной записи
+// возвращает ESP_ERR_INVALID_STATE (двойная подписка = утечка).
+esp_err_t app_evt_subscribe(app_evt_sub_t *sub, int32_t id, esp_event_handler_t cb, void *arg);
+
+// Идемпотентно: можно звать на неактивной/нулевой записи. Блокируется, пока
+// выполняется уже запущенный обработчик, поэтому после возврата обработчик
+// гарантированно не работает и больше не стартует.
+void app_evt_unsubscribe(app_evt_sub_t *sub);
+

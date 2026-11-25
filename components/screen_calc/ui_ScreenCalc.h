@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenCalc
 extern void ui_ScreenCalc_screen_init(void);
 extern void ui_ScreenCalc_screen_destroy(void);
-extern void ui_ScreenCalc_full_init(void);
 extern void ui_event_ScreenCalc(lv_event_t * e);
 extern lv_obj_t * ui_ScreenCalc;
 extern lv_obj_t * ui_Container1;

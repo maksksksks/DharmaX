@@ -141,6 +141,16 @@ static void card_released_cb(lv_event_t *e)
 // ==========================================
 // СОЗДАНИЕ ЛЕНТЫ / КАРТОЧЕК
 // ==========================================
+// Скрытый "экран-ангар": на него переезжает лента, пока её экран уничтожен.
+// Он не загружается на дисплей, поэтому ничего не рисуется.
+static lv_obj_t *s_holder = NULL;
+
+static lv_obj_t *holder(void)
+{
+    if (s_holder == NULL) s_holder = lv_obj_create(NULL);
+    return s_holder;
+}
+
 card_feed_t card_feed_create(lv_obj_t *parent, uint32_t auto_delete_ms)
 {
     card_feed_t feed = lv_malloc(sizeof(struct card_feed_s));
@@ -274,6 +284,34 @@ void card_feed_clear(card_feed_t feed)
     for (int i = (int)cnt - 1; i >= 0; i--) {
         delete_card(feed, lv_obj_get_child(feed->container, i));
     }
+}
+
+card_feed_t card_feed_create_detached(uint32_t auto_delete_ms)
+{
+    return card_feed_create(holder(), auto_delete_ms);
+}
+
+void card_feed_attach(card_feed_t feed, lv_obj_t *parent)
+{
+    if (!feed || !parent) return;
+    lv_obj_set_parent(feed->container, parent);
+}
+
+void card_feed_detach(card_feed_t feed)
+{
+    if (!feed) return;
+    // Бросаем недосвайпнутую карточку: после переноса жеста уже не будет
+    feed->active_swipe_card = NULL;
+    lv_obj_add_flag(feed->container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_parent(feed->container, holder());
+}
+
+void card_feed_destroy(card_feed_t feed)
+{
+    if (!feed) return;
+    card_feed_clear(feed);              // удаляет карточки вместе с их auto-delete таймерами
+    lv_obj_delete(feed->container);
+    lv_free(feed);
 }
 
 lv_obj_t *card_feed_get_container(card_feed_t feed)

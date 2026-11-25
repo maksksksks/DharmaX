@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenSettings
 extern void ui_ScreenSettings_screen_init(void);
 extern void ui_ScreenSettings_screen_destroy(void);
-extern void ui_ScreenSettings_full_init(void);
 extern void ui_event_ScreenSettings(lv_event_t * e);
 extern lv_obj_t * ui_ScreenSettings;
 extern lv_obj_t * ui_Label14;

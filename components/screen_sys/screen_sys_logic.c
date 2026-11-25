@@ -11,6 +11,7 @@ static lv_obj_t *lbl_signal;
 static lv_obj_t *lbl_battery;
 static lv_obj_t *lbl_carrier;
 static lv_obj_t *lbl_connection_state;
+static app_evt_sub_t s_sub_status;
 
 static void build_ui(void)
 {
@@ -58,6 +59,7 @@ static void build_ui(void)
 static void phone_status_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
 {
     (void)arg; (void)base; (void)id;
+    if (lbl_connection_state == NULL) return;
     phone_status_data_t *ps = (phone_status_data_t *)event_data;
 
     lv_label_set_text(lbl_connection_state, LV_SYMBOL_OK " Connected");
@@ -81,15 +83,29 @@ static void phone_status_handler(void *arg, esp_event_base_t base, int32_t id, v
     lv_label_set_text(lbl_carrier, buf);
 }
 
-void screen_sys_logic_init(void)
+static void logic_init(void)
 {
     build_ui();
-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_PHONE_STATUS_UPDATED, phone_status_handler, NULL, NULL);
+    app_evt_subscribe(&s_sub_status, EVT_BLE_PHONE_STATUS_UPDATED, phone_status_handler, NULL);
     ESP_LOGI(TAG, "Sys (phone status) screen logic initialized");
 }
 
-void ui_ScreenSys_full_init(void)
+static void logic_deinit(void)
+{
+    app_evt_unsubscribe(&s_sub_status);
+    lbl_signal = lbl_battery = lbl_carrier = lbl_connection_state = NULL;
+}
+
+lv_obj_t *screen_sys_create(void)
 {
     ui_ScreenSys_screen_init();
-    screen_sys_logic_init();
+    logic_init();
+    return ui_ScreenSys;
+}
+
+void screen_sys_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSys
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenSys_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

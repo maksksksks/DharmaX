@@ -222,7 +222,7 @@ static void bind_button(lv_obj_t *btn, const char *action, bool is_op, bool is_e
     }
 }
 
-void screen_calc_logic_init(void)
+static void logic_init(void)
 {
     UI_APPLY_SCREEN_BG(ui_ScreenCalc);
     lv_obj_set_style_text_color(ui_Label19, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
@@ -256,8 +256,21 @@ void screen_calc_logic_init(void)
     ESP_LOGI(TAG, "Calculator screen logic initialized");
 }
 
-void ui_ScreenCalc_full_init(void)
+static void logic_deinit(void)
+{
+    // ничего своего: ни подписок, ни таймеров; ui_ScreenCalc_screen_destroy() обнулит ui_*
+}
+
+lv_obj_t *screen_calc_create(void)
 {
     ui_ScreenCalc_screen_init();
-    screen_calc_logic_init();
+    logic_init();
+    return ui_ScreenCalc;
+}
+
+void screen_calc_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenCalc
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenCalc_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

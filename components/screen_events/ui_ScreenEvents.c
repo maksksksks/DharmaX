@@ -4,6 +4,7 @@
 // Project name: DharmaXĶ
 
 #include "ui.h"
+#include "app_nav.h"
 
 lv_obj_t * ui_ScreenEvents = NULL;
 lv_obj_t * ui_Label18 = NULL;
@@ -14,7 +15,7 @@ void ui_event_Label18(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenCalendar_full_init);
+nav_replace_ex("calendar", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
 }
 }
 

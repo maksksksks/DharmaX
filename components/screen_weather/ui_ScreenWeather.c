@@ -4,6 +4,7 @@
 // Project name: DharmaXĶ
 
 #include "ui.h"
+#include "app_nav.h"
 
 lv_obj_t * ui_ScreenWeather = NULL;
 lv_obj_t * ui_Label11 = NULL;
@@ -14,19 +15,19 @@ void ui_event_ScreenWeather(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenWeatherDetails, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeatherDetails_full_init);
+nav_replace_ex("weatherdetails", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSettings_full_init);
+nav_replace_ex("settings", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenHome_screen_init);
+nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
 }
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenNews, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenNews_full_init);
+nav_replace_ex("news", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
 }
 }
 

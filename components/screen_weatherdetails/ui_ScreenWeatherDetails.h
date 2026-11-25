@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenWeatherDetails
 extern void ui_ScreenWeatherDetails_screen_init(void);
 extern void ui_ScreenWeatherDetails_screen_destroy(void);
-extern void ui_ScreenWeatherDetails_full_init(void);
 extern void ui_event_ScreenWeatherDetails(lv_event_t * e);
 extern lv_obj_t * ui_ScreenWeatherDetails;
 extern lv_obj_t * ui_Label12;

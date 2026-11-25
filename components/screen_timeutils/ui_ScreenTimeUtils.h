@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_ScreenTimeUtils
 extern void ui_ScreenTimeUtils_screen_init(void);
 extern void ui_ScreenTimeUtils_screen_destroy(void);
-extern void ui_ScreenTimeUtils_full_init(void);
 extern void ui_event_ScreenTimeUtils(lv_event_t * e);
 extern lv_obj_t * ui_ScreenTimeUtils;
 extern lv_obj_t * ui_TabView2;

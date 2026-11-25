@@ -11,7 +11,7 @@
 static const char *TAG = "SCREEN_SYSTEM";
 
 static lv_obj_t *lbl_chip, *lbl_flash, *lbl_heap, *lbl_idf, *lbl_uptime;
-static lv_timer_t *refresh_timer;
+static lv_timer_t *refresh_timer = NULL;
 
 static void format_uptime(int64_t us, char *buf, size_t buf_sz)
 {
@@ -107,7 +107,7 @@ static void refresh_static(void)
     lv_label_set_text(lbl_idf, esp_get_idf_version());
 }
 
-void screen_system_logic_init(void)
+static void logic_init(void)
 {
     build_ui();
     refresh_static();
@@ -116,8 +116,22 @@ void screen_system_logic_init(void)
     ESP_LOGI(TAG, "System screen logic initialized");
 }
 
-void ui_ScreenSystem_full_init(void)
+static void logic_deinit(void)
+{
+    if (refresh_timer) { lv_timer_delete(refresh_timer); refresh_timer = NULL; }
+    lbl_chip = lbl_flash = lbl_heap = lbl_idf = lbl_uptime = NULL;
+}
+
+lv_obj_t *screen_system_create(void)
 {
     ui_ScreenSystem_screen_init();
-    screen_system_logic_init();
+    logic_init();
+    return ui_ScreenSystem;
+}
+
+void screen_system_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSystem
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenSystem_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

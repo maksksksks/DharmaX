@@ -28,7 +28,7 @@ static void apply_theme(void)
     lv_obj_set_style_bg_opa(ui_Calendar, LV_OPA_50, LV_PART_ITEMS | LV_STATE_DISABLED);
 }
 
-void screen_calendar_logic_init(void)
+static void logic_init(void)
 {
     apply_theme();
 
@@ -41,8 +41,21 @@ void screen_calendar_logic_init(void)
     ESP_LOGI(TAG, "Calendar screen logic initialized");
 }
 
-void ui_ScreenCalendar_full_init(void)
+static void logic_deinit(void)
+{
+    // ничего своего: ни подписок, ни таймеров; ui_ScreenCalendar_screen_destroy() обнулит ui_*
+}
+
+lv_obj_t *screen_calendar_create(void)
 {
     ui_ScreenCalendar_screen_init();
-    screen_calendar_logic_init();
+    logic_init();
+    return ui_ScreenCalendar;
+}
+
+void screen_calendar_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenCalendar
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenCalendar_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

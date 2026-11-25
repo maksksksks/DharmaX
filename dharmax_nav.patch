@@ -1,0 +1,3227 @@
+diff --git a/components/app_core/app_events.c b/components/app_core/app_events.c
+index be2bdd7..adbfb98 100644
+--- a/components/app_core/app_events.c
++++ b/components/app_core/app_events.c
+@@ -1,5 +1,27 @@
++#include <stddef.h>
+ #include "app_events.h"
+ #include "esp_event.h"
+ 
+ // Определяем базу событий (реальная инициализация "радиостанции")
+-ESP_EVENT_DEFINE_BASE(APP_EVENTS);
+\ No newline at end of file
++ESP_EVENT_DEFINE_BASE(APP_EVENTS);
++
++esp_err_t app_evt_subscribe(app_evt_sub_t *sub, int32_t id, esp_event_handler_t cb, void *arg)
++{
++    if (sub == NULL || cb == NULL) return ESP_ERR_INVALID_ARG;
++    if (sub->inst != NULL) return ESP_ERR_INVALID_STATE;
++
++    esp_event_handler_instance_t inst = NULL;
++    esp_err_t err = esp_event_handler_instance_register(APP_EVENTS, id, cb, arg, &inst);
++    if (err == ESP_OK) {
++        sub->id = id;
++        sub->inst = inst;
++    }
++    return err;
++}
++
++void app_evt_unsubscribe(app_evt_sub_t *sub)
++{
++    if (sub == NULL || sub->inst == NULL) return;
++    esp_event_handler_instance_unregister(APP_EVENTS, sub->id, sub->inst);
++    sub->inst = NULL;
++}
+diff --git a/components/app_core/app_events.h b/components/app_core/app_events.h
+index 498d988..d76d73c 100644
+--- a/components/app_core/app_events.h
++++ b/components/app_core/app_events.h
+@@ -121,3 +121,23 @@ typedef struct {
+     bool charging;
+     char carrier[16];        // имя оператора, может быть ""
+ } phone_status_data_t;
++
++// ---------------------------------------------------------------------------
++// Подписка с запоминанием instance-хендла. Экраны (app_nav) хранят такие
++// записи у себя и в destroy() вызывают app_evt_unsubscribe() - это и есть
++// "снять ВСЕ esp_event_handler_instance_unregister".
++// ---------------------------------------------------------------------------
++typedef struct {
++    int32_t id;
++    esp_event_handler_instance_t inst;   // NULL = не подписан
++} app_evt_sub_t;
++
++// Подписывает cb на (APP_EVENTS, id). Повторный вызов на уже активной записи
++// возвращает ESP_ERR_INVALID_STATE (двойная подписка = утечка).
++esp_err_t app_evt_subscribe(app_evt_sub_t *sub, int32_t id, esp_event_handler_t cb, void *arg);
++
++// Идемпотентно: можно звать на неактивной/нулевой записи. Блокируется, пока
++// выполняется уже запущенный обработчик, поэтому после возврата обработчик
++// гарантированно не работает и больше не стартует.
++void app_evt_unsubscribe(app_evt_sub_t *sub);
++
+diff --git a/components/app_nav/CMakeLists.txt b/components/app_nav/CMakeLists.txt
+new file mode 100644
+index 0000000..dc0d6d5
+--- /dev/null
++++ b/components/app_nav/CMakeLists.txt
+@@ -0,0 +1,5 @@
++idf_component_register(
++    SRCS "app_nav.c"
++    INCLUDE_DIRS "."
++    REQUIRES lvgl log
++)
+diff --git a/components/app_nav/app_nav.c b/components/app_nav/app_nav.c
+new file mode 100644
+index 0000000..1da3d5b
+--- /dev/null
++++ b/components/app_nav/app_nav.c
+@@ -0,0 +1,373 @@
++#include "app_nav.h"
++
++#include <stdint.h>
++#include <string.h>
++#include "esp_log.h"
++
++static const char *TAG = "APP_NAV";
++
++// Запас сверх длительности анимации, после которого переход принудительно
++// завершается, если LV_EVENT_SCREEN_UNLOADED почему-то не пришёл.
++#define NAV_WATCHDOG_MARGIN_MS  400
++#define NAV_WATCHDOG_RETRY_MS   100
++#define NAV_WATCHDOG_MAX_RETRY  20
++
++typedef struct {
++    const screen_desc_t *desc;
++    lv_obj_t *scr;
++} nav_entry_t;
++
++typedef enum {
++    NAV_OP_PUSH,
++    NAV_OP_POP,
++    NAV_OP_REPLACE,
++    NAV_OP_HOME,
++} nav_op_t;
++
++typedef struct {
++    nav_op_t op;
++    const screen_desc_t *target;      // для PUSH / REPLACE
++    lv_screen_load_anim_t anim;
++    uint32_t ms;
++} nav_req_t;
++
++static struct {
++    const screen_desc_t *registry;
++    size_t count;
++
++    nav_entry_t stack[NAV_STACK_MAX];  // stack[0] - всегда home
++    size_t depth;
++
++    // --- текущий переход ---
++    bool busy;
++    uint32_t gen;                      // номер перехода, отсекает "протухшие" колбэки
++    lv_obj_t *from;                    // экран, который уходит
++    lv_obj_t *to;                      // экран, который приходит
++    nav_entry_t doomed[NAV_STACK_MAX]; // что уничтожить, когда переход закончится
++    size_t doomed_n;
++    lv_timer_t *watchdog;
++    uint8_t retries;
++
++    // --- очередь из одного слота ---
++    bool has_queued;
++    nav_req_t queued;
++} s;
++
++static void execute(const nav_req_t *r);
++
++// ---------------------------------------------------------------------------
++// helpers
++// ---------------------------------------------------------------------------
++static const screen_desc_t *find_desc(const char *id)
++{
++    if (!id) return NULL;
++    for (size_t i = 0; i < s.count; i++) {
++        if (s.registry[i].id && strcmp(s.registry[i].id, id) == 0) return &s.registry[i];
++    }
++    return NULL;
++}
++
++static bool is_home(const screen_desc_t *d)
++{
++    return d && d->id && strcmp(d->id, NAV_HOME_ID) == 0;
++}
++
++static bool in_stack(const screen_desc_t *d)
++{
++    for (size_t i = 0; i < s.depth; i++) {
++        if (s.stack[i].desc == d) return true;
++    }
++    return false;
++}
++
++static bool is_doomed(const lv_obj_t *scr)
++{
++    for (size_t i = 0; i < s.doomed_n; i++) {
++        if (s.doomed[i].scr == scr) return true;
++    }
++    return false;
++}
++
++static nav_entry_t *top(void)
++{
++    return s.depth ? &s.stack[s.depth - 1] : NULL;
++}
++
++// ---------------------------------------------------------------------------
++// завершение перехода: вот здесь, и только здесь, вызываются destroy()
++// ---------------------------------------------------------------------------
++static void watchdog_cb(lv_timer_t *t);
++static void on_from_unloaded(lv_event_t *e);
++
++static void arm_watchdog(uint32_t period_ms)
++{
++    s.watchdog = lv_timer_create(watchdog_cb, period_ms, (void *)(uintptr_t)s.gen);
++    lv_timer_set_repeat_count(s.watchdog, 1);   // сработает один раз и удалится сам
++}
++
++static void finalize(uint32_t gen)
++{
++    if (!s.busy || gen != s.gen) return;        // устаревший вызов
++
++    if (s.watchdog) {
++        lv_timer_delete(s.watchdog);
++        s.watchdog = NULL;
++    }
++
++    // Не трогаем старые экраны, пока целевой не стал активным: удаление
++    // экрана посреди анимации ломает отрисовку.
++    if (s.to && lv_screen_active() != s.to && s.retries < NAV_WATCHDOG_MAX_RETRY) {
++        s.retries++;
++        ESP_LOGW(TAG, "target screen not active yet, retry %u", (unsigned)s.retries);
++        arm_watchdog(NAV_WATCHDOG_RETRY_MS);
++        return;
++    }
++
++    // Наш колбэк остаётся только на экране, который выжил (push / pop->prev).
++    if (s.from && !is_doomed(s.from)) {
++        lv_obj_remove_event_cb_with_user_data(s.from, on_from_unloaded, (void *)(uintptr_t)gen);
++    }
++
++    // Порядок: сначала destroy() всех обречённых (он снимает подписки/таймеры
++    // и делает lv_obj_del), и только потом переход считается законченным.
++    for (size_t i = 0; i < s.doomed_n; i++) {
++        nav_entry_t e = s.doomed[i];
++        if (e.desc && e.desc->destroy) {
++            ESP_LOGI(TAG, "destroy '%s'", e.desc->id);
++            e.desc->destroy(e.scr);
++        }
++    }
++    s.doomed_n = 0;
++    s.from = NULL;
++    s.to = NULL;
++    s.busy = false;
++
++    if (s.has_queued) {
++        nav_req_t req = s.queued;
++        s.has_queued = false;
++        execute(&req);
++    }
++}
++
++static void finalize_async_cb(void *user_data)
++{
++    finalize((uint32_t)(uintptr_t)user_data);
++}
++
++// LV_EVENT_SCREEN_UNLOADED приходит из внутренностей lv_screen_load_anim()
++// (иногда синхронно, иногда в конце анимации), поэтому саму работу переносим
++// на следующий тик LVGL: нельзя удалять экран из его же event-колбэка.
++static void on_from_unloaded(lv_event_t *e)
++{
++    lv_async_call(finalize_async_cb, lv_event_get_user_data(e));
++}
++
++static void watchdog_cb(lv_timer_t *t)
++{
++    uint32_t gen = (uint32_t)(uintptr_t)lv_timer_get_user_data(t);
++    if (s.watchdog == t) s.watchdog = NULL;     // таймер удалится сам (repeat_count = 1)
++    if (s.busy && gen == s.gen) {
++        ESP_LOGW(TAG, "transition watchdog fired, finalizing");
++        finalize(gen);
++    }
++}
++
++static void begin_transition(lv_obj_t *from, lv_obj_t *to, lv_screen_load_anim_t anim, uint32_t ms)
++{
++    if (anim == LV_SCR_LOAD_ANIM_NONE) ms = 0;
++
++    s.busy = true;
++    s.gen++;
++    s.from = from;
++    s.to = to;
++    s.retries = 0;
++
++    // Колбэк и watchdog - ДО lv_screen_load_anim(): при ms == 0 событие
++    // UNLOADED прилетает синхронно изнутри этого вызова.
++    lv_obj_add_event_cb(from, on_from_unloaded, LV_EVENT_SCREEN_UNLOADED, (void *)(uintptr_t)s.gen);
++    arm_watchdog(ms + NAV_WATCHDOG_MARGIN_MS);
++
++    lv_screen_load_anim(to, anim, ms, 0, false);   // auto_del = false: удаляем сами, через destroy()
++}
++
++// ---------------------------------------------------------------------------
++// операции
++// ---------------------------------------------------------------------------
++static void bootstrap_home(const screen_desc_t *d)
++{
++    lv_obj_t *scr = d->create();
++    if (!scr) {
++        ESP_LOGE(TAG, "create('%s') returned NULL", d->id);
++        return;
++    }
++    s.stack[0] = (nav_entry_t){ .desc = d, .scr = scr };
++    s.depth = 1;
++    lv_screen_load(scr);
++    ESP_LOGI(TAG, "home is up (resident)");
++}
++
++static void do_home(const nav_req_t *r)
++{
++    if (s.depth <= 1) return;                   // уже на home
++
++    lv_obj_t *from = top()->scr;
++    lv_obj_t *to = s.stack[0].scr;
++
++    s.doomed_n = 0;
++    for (size_t i = 1; i < s.depth; i++) s.doomed[s.doomed_n++] = s.stack[i];
++    s.depth = 1;
++
++    begin_transition(from, to, r->anim, r->ms);
++}
++
++static void do_push(const nav_req_t *r)
++{
++    const screen_desc_t *t = r->target;
++
++    if (is_home(t)) {
++        if (s.depth == 0) bootstrap_home(t);
++        else do_home(r);
++        return;
++    }
++    if (s.depth == 0) {
++        ESP_LOGE(TAG, "push('%s') before home: call nav_push(\"home\") first", t->id);
++        return;
++    }
++    if (s.depth >= NAV_STACK_MAX) {
++        ESP_LOGE(TAG, "stack full, push('%s') dropped", t->id);
++        return;
++    }
++    if (in_stack(t)) {
++        ESP_LOGW(TAG, "'%s' already in stack, push ignored", t->id);
++        return;
++    }
++
++    lv_obj_t *scr = t->create();
++    if (!scr) {
++        ESP_LOGE(TAG, "create('%s') returned NULL", t->id);
++        return;
++    }
++
++    lv_obj_t *from = top()->scr;
++    s.stack[s.depth++] = (nav_entry_t){ .desc = t, .scr = scr };
++    s.doomed_n = 0;                             // push ничего не уничтожает
++    begin_transition(from, scr, r->anim, r->ms);
++}
++
++static void do_pop(const nav_req_t *r)
++{
++    if (s.depth < 2) return;                    // на home pop ничего не делает
++
++    nav_entry_t gone = s.stack[s.depth - 1];
++    nav_entry_t back = s.stack[s.depth - 2];
++    s.depth--;
++
++    s.doomed[0] = gone;
++    s.doomed_n = 1;
++    begin_transition(gone.scr, back.scr, r->anim, r->ms);
++}
++
++static void do_replace(const nav_req_t *r)
++{
++    const screen_desc_t *t = r->target;
++
++    if (is_home(t)) {
++        do_home(r);
++        return;
++    }
++    if (s.depth == 0) {
++        ESP_LOGE(TAG, "replace('%s') before home", t->id);
++        return;
++    }
++    nav_entry_t *cur = top();
++    if (cur->desc == t) return;                 // уже здесь
++    if (in_stack(t)) {
++        ESP_LOGW(TAG, "'%s' already in stack, replace ignored", t->id);
++        return;
++    }
++    if (is_home(cur->desc)) {                   // home не уничтожаем: ведём себя как push
++        do_push(r);
++        return;
++    }
++
++    lv_obj_t *scr = t->create();
++    if (!scr) {
++        ESP_LOGE(TAG, "create('%s') returned NULL", t->id);
++        return;
++    }
++
++    nav_entry_t old = *cur;
++    *cur = (nav_entry_t){ .desc = t, .scr = scr };
++    s.doomed[0] = old;
++    s.doomed_n = 1;
++    begin_transition(old.scr, scr, r->anim, r->ms);
++}
++
++static void execute(const nav_req_t *r)
++{
++    switch (r->op) {
++    case NAV_OP_PUSH:    do_push(r);    break;
++    case NAV_OP_POP:     do_pop(r);     break;
++    case NAV_OP_REPLACE: do_replace(r); break;
++    case NAV_OP_HOME:    do_home(r);    break;
++    }
++}
++
++static void submit(const nav_req_t *r)
++{
++    if (s.busy) {
++        s.queued = *r;                          // последний запрос вытесняет предыдущий
++        s.has_queued = true;
++        return;
++    }
++    execute(r);
++}
++
++// ---------------------------------------------------------------------------
++// публичный API
++// ---------------------------------------------------------------------------
++void nav_init(const screen_desc_t *registry, size_t count)
++{
++    memset(&s, 0, sizeof(s));
++    s.registry = registry;
++    s.count = count;
++}
++
++void nav_push_ex(const char *screen_id, lv_screen_load_anim_t anim, uint32_t time_ms)
++{
++    const screen_desc_t *d = find_desc(screen_id);
++    if (!d) { ESP_LOGE(TAG, "push: unknown screen '%s'", screen_id ? screen_id : "(null)"); return; }
++    nav_req_t r = { .op = NAV_OP_PUSH, .target = d, .anim = anim, .ms = time_ms };
++    submit(&r);
++}
++
++void nav_pop_ex(lv_screen_load_anim_t anim, uint32_t time_ms)
++{
++    nav_req_t r = { .op = NAV_OP_POP, .anim = anim, .ms = time_ms };
++    submit(&r);
++}
++
++void nav_replace_ex(const char *screen_id, lv_screen_load_anim_t anim, uint32_t time_ms)
++{
++    const screen_desc_t *d = find_desc(screen_id);
++    if (!d) { ESP_LOGE(TAG, "replace: unknown screen '%s'", screen_id ? screen_id : "(null)"); return; }
++    nav_req_t r = { .op = NAV_OP_REPLACE, .target = d, .anim = anim, .ms = time_ms };
++    submit(&r);
++}
++
++void nav_back_to_home_ex(lv_screen_load_anim_t anim, uint32_t time_ms)
++{
++    nav_req_t r = { .op = NAV_OP_HOME, .anim = anim, .ms = time_ms };
++    submit(&r);
++}
++
++void nav_push(const char *screen_id)    { nav_push_ex(screen_id, LV_SCR_LOAD_ANIM_NONE, 0); }
++void nav_pop(void)                      { nav_pop_ex(LV_SCR_LOAD_ANIM_NONE, 0); }
++void nav_replace(const char *screen_id) { nav_replace_ex(screen_id, LV_SCR_LOAD_ANIM_NONE, 0); }
++void nav_back_to_home(void)             { nav_back_to_home_ex(LV_SCR_LOAD_ANIM_NONE, 0); }
++
++const char *nav_current_id(void)
++{
++    nav_entry_t *t = top();
++    return t ? t->desc->id : NULL;
++}
+diff --git a/components/app_nav/app_nav.h b/components/app_nav/app_nav.h
+new file mode 100644
+index 0000000..cd5dff7
+--- /dev/null
++++ b/components/app_nav/app_nav.h
+@@ -0,0 +1,77 @@
++#pragma once
++
++#include <stddef.h>
++#include "lvgl.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * app_nav - навигатор экранов с ленивым созданием/уничтожением.
++ *
++ * Правила:
++ *  - Экран "home" (NAV_HOME_ID) резидентный: создаётся один раз первым
++ *    nav_push("home") и никогда не уничтожается навигатором.
++ *  - Все остальные экраны создаются в nav_push/nav_replace и уничтожаются в
++ *    nav_pop/nav_replace/nav_back_to_home - ПОСЛЕ окончания анимации, когда
++ *    экран уже выгружен из дисплея.
++ *  - Перед уничтожением навигатор вызывает desc->destroy(scr). Именно destroy()
++ *    обязан: снять ВСЕ esp_event подписки экрана, удалить ВСЕ его lv_timer,
++ *    обнулить статические/глобальные указатели на его виджеты и удалить сам
++ *    экран (lv_obj_del).
++ *  - Одновременно существует не больше одного экземпляра каждого экрана
++ *    (описания экранов - синглтоны со статическим состоянием). Запрос на
++ *    экран, который уже есть в стеке, игнорируется.
++ *  - Пока идёт переход (анимация + отложенное уничтожение), новые запросы не
++ *    выполняются сразу, а встают в очередь из одного слота (побеждает
++ *    последний). Так два перехода никогда не пересекаются.
++ *
++ * Потоки: все nav_* вызываются только из LVGL-задачи либо под LVGL-мьютексом.
++ */
++
++typedef struct {
++    const char *id;                  // "home", "notify", "weather", ...
++    lv_obj_t *(*create)(void);       // строит дерево LVGL + подписывается на события
++    void (*destroy)(lv_obj_t *scr);  // отписывается, удаляет таймеры, lv_obj_del
++} screen_desc_t;
++
++#define NAV_HOME_ID          "home"
++#define NAV_STACK_MAX        4       // home + максимум 3 экрана поверх
++#define NAV_DEFAULT_ANIM_MS  500
++
++// Регистрирует таблицу экранов. registry должен жить всё время работы
++// (обычно static const массив). Экраны не создаёт.
++void nav_init(const screen_desc_t *registry, size_t count);
++
++// Создаёт целевой экран и кладёт его поверх стека. Текущий экран прячется и
++// остаётся жить (его вернёт nav_pop). Первый вызов nav_push("home")
++// загружает резидентный home без анимации.
++void nav_push(const char *screen_id);
++
++// Уничтожает верхний экран и показывает предыдущий. На home ничего не делает.
++void nav_pop(void);
++
++// Уничтожает текущий экран и на его место создаёт новый. Если текущий - home,
++// home остаётся жить под новым экраном (как при nav_push).
++// nav_replace("home") равнозначен nav_back_to_home().
++void nav_replace(const char *screen_id);
++
++// Уничтожает всё, что лежит над home, и показывает home.
++void nav_back_to_home(void);
++
++// Те же операции с явной анимацией перехода. anim = LV_SCR_LOAD_ANIM_NONE или
++// time_ms = 0 - мгновенная смена. Короткие версии выше используют
++// LV_SCR_LOAD_ANIM_NONE.
++void nav_push_ex(const char *screen_id, lv_screen_load_anim_t anim, uint32_t time_ms);
++void nav_pop_ex(lv_screen_load_anim_t anim, uint32_t time_ms);
++void nav_replace_ex(const char *screen_id, lv_screen_load_anim_t anim, uint32_t time_ms);
++void nav_back_to_home_ex(lv_screen_load_anim_t anim, uint32_t time_ms);
++
++// id верхнего экрана стека (NULL, если стек пуст). Во время перехода уже
++// показывает ЦЕЛЕВОЙ экран.
++const char *nav_current_id(void);
++
++#ifdef __cplusplus
++} /*extern "C"*/
++#endif
+diff --git a/components/app_ui/CMakeLists.txt b/components/app_ui/CMakeLists.txt
+index c3f48ee..d33dc77 100644
+--- a/components/app_ui/CMakeLists.txt
++++ b/components/app_ui/CMakeLists.txt
+@@ -7,6 +7,7 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         screen_home
+         screen_notify
+         screen_phone
+diff --git a/components/app_ui/app_ui.c b/components/app_ui/app_ui.c
+index 1ac7800..74cb7d7 100644
+--- a/components/app_ui/app_ui.c
++++ b/components/app_ui/app_ui.c
+@@ -1,5 +1,6 @@
+ #include "app_ui.h"
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ #include "screen_home_logic.h"
+ #include "screen_notify_logic.h"
+@@ -22,28 +23,46 @@
+ 
+ static const char *TAG = "APP_UI";
+ 
++// Реестр экранов. Порядок не важен, id - ключ для nav_push/nav_replace.
++// home резидентный (создаётся один раз ниже), остальные живут от nav_push/
++// nav_replace до nav_pop/nav_replace/nav_back_to_home.
++static const screen_desc_t k_screens[] = {
++    { NAV_HOME_ID,      screen_home_create,           screen_home_destroy           },
++    { "notify",         screen_notify_create,         screen_notify_destroy         },
++    { "phone",          screen_phone_create,          screen_phone_destroy          },
++    { "timeutils",      screen_timeutils_create,      screen_timeutils_destroy      },
++    { "calc",           screen_calc_create,           screen_calc_destroy           },
++    { "weather",        screen_weather_create,        screen_weather_destroy        },
++    { "sd",             screen_sd_create,             screen_sd_destroy             },
++    { "calendar",       screen_calendar_create,       screen_calendar_destroy       },
++    { "settings",       screen_settings_create,       screen_settings_destroy       },
++    { "system",         screen_system_create,         screen_system_destroy         },
++    { "weatherdetails", screen_weatherdetails_create, screen_weatherdetails_destroy },
++    { "news",           screen_news_create,           screen_news_destroy           },
++    { "events",         screen_events_create,         screen_events_destroy         },
++    { "sys",            screen_sys_create,            screen_sys_destroy            },
++    { "ir",             screen_ir_create,             screen_ir_destroy             },
++    { "aod",            screen_aod_create,            screen_aod_destroy            },
++};
++
+ void app_ui_init(void)
+ {
+-    // 1. Строим все экраны (SquareLine-сгенерированное дерево виджетов).
++    // 1. Тема дисплея (единственное, что осталось от старого массового ui_init()).
+     ui_init();
+ 
+-    // 2. Довешиваем логику каждого экрана
+-    screen_home_logic_init();
+-    // screen_notify_logic_init();
+-    // screen_phone_logic_init();
+-    // screen_timeutils_logic_init();
+-    // screen_calc_logic_init();
+-    // screen_weather_logic_init();
+-    // screen_sd_logic_init();
+-    // screen_calendar_logic_init();
+-    // screen_settings_logic_init();
+-    // screen_system_logic_init();
+-    // screen_weatherdetails_logic_init();
+-    screen_news_logic_init();
+-    // screen_events_logic_init();
+-    // screen_sys_logic_init();
+-    // screen_ir_logic_init();
++    // 2. Слой данных, который обязан работать, пока экранов нет:
++    //    - ленты уведомлений / событий / новостей (карточки не должны теряться,
++    //      когда экран уничтожен);
++    //    - триггеры AOD по EVT_MOTION_WRIST_SLEEP/RAISE.
++    screen_notify_service_init();
++    screen_events_service_init();
++    screen_news_service_init();
+     screen_aod_logic_init();
+ 
+-    ESP_LOGI(TAG, "App UI fully initialized");
++    // 3. Навигатор: регистрируем дескрипторы и поднимаем резидентный home.
++    //    Остальные экраны создаются лениво, по nav_push/nav_replace.
++    nav_init(k_screens, sizeof(k_screens) / sizeof(k_screens[0]));
++    nav_push(NAV_HOME_ID);
++
++    ESP_LOGI(TAG, "App UI initialized, home is up");
+ }
+diff --git a/components/app_ui/app_ui.h b/components/app_ui/app_ui.h
+index 3ff7012..cdd8b4d 100644
+--- a/components/app_ui/app_ui.h
++++ b/components/app_ui/app_ui.h
+@@ -4,8 +4,9 @@
+ extern "C" {
+ #endif
+ 
+-// Единая точка входа: строит все экраны (ui_init()) и запускает логику
+-// каждого из них (*_logic_init()). Вызвать один раз из app_main(),
++// Единая точка входа UI: тема дисплея, сервисы данных (ленты, триггеры AOD),
++// регистрация экранов в app_nav и nav_push("home"). Остальные экраны создаются
++// лениво навигатором. Вызвать один раз из app_main() под LVGL-мьютексом,
+ // после того как LVGL, дисплей и app_core уже проинициализированы.
+ void app_ui_init(void);
+ 
+diff --git a/components/screen_aod/CMakeLists.txt b/components/screen_aod/CMakeLists.txt
+index f3e3d5d..c11e4fa 100644
+--- a/components/screen_aod/CMakeLists.txt
++++ b/components/screen_aod/CMakeLists.txt
+@@ -9,5 +9,6 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         svc_screen_sleep
+ )
+diff --git a/components/screen_aod/screen_aod_logic.c b/components/screen_aod/screen_aod_logic.c
+index 127d7ec..e52b3d5 100644
+--- a/components/screen_aod/screen_aod_logic.c
++++ b/components/screen_aod/screen_aod_logic.c
+@@ -1,5 +1,6 @@
+ #include "screen_aod_logic.h"
+ #include "ui.h"
++#include "app_nav.h"
+ #include "app_events.h"
+ #include "esp_event.h"
+ #include "esp_log.h"
+@@ -12,12 +13,14 @@ static const char *TAG = "SCREEN_AOD";
+ #define CX  (EXAMPLE_LCD_H_RES / 2)
+ #define CY  (EXAMPLE_LCD_V_RES / 2)
+ 
+-static lv_obj_t *s_prev_screen = NULL;
+ static lv_timer_t *s_tick_timer = NULL;
+-static bool s_in_aod = false;
++static bool s_in_aod = false;                       // "хотим быть в AOD" (учитывает отложенные переходы nav)
++static app_evt_sub_t s_sub_sleep, s_sub_raise;      // триггеры входа/выхода, живут весь uptime
+ 
+ static void aod_update_hands(void)
+ {
++    if (ui_AodHourHand == NULL) return;             // экрана сейчас нет
++
+     time_t now;
+     struct tm tm_now;
+     time(&now);
+@@ -48,43 +51,54 @@ static void aod_tick_timer_cb(lv_timer_t *timer)
+     aod_update_hands();
+ }
+ 
+-void screen_aod_enter(void)
++// ---------------------------------------------------------
++// Жизненный цикл экрана (для app_nav)
++// ---------------------------------------------------------
++lv_obj_t *screen_aod_create(void)
+ {
+-    if (s_in_aod) return;
+-
+-    s_prev_screen = lv_screen_active();
+-    if (s_prev_screen == ui_ScreenAOD) s_prev_screen = ui_ScreenHome;
+-
+-    if (ui_ScreenAOD == NULL) ui_ScreenAOD_screen_init();
+-
++    ui_ScreenAOD_screen_init();
+     aod_update_hands();
+-    lv_screen_load_anim(ui_ScreenAOD, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
++    // Таймер существует только пока существует экран: в остальное время AOD не тратит CPU.
++    s_tick_timer = lv_timer_create(aod_tick_timer_cb, 1000, NULL);
++    return ui_ScreenAOD;
++}
+ 
+-    if (s_tick_timer == NULL)
+-        s_tick_timer = lv_timer_create(aod_tick_timer_cb, 1000, NULL);
++void screen_aod_destroy(lv_obj_t *scr)
++{
++    (void)scr;
++    if (s_tick_timer) { lv_timer_delete(s_tick_timer); s_tick_timer = NULL; }
++    ui_ScreenAOD_screen_destroy();                  // lv_obj_del + обнуление ui_Aod*
++}
+ 
++// ---------------------------------------------------------
++// Вход / выход: AOD - оверлей поверх стека навигатора.
++// push оставляет текущий экран жить (его вернёт pop), так что таймер
++// обратного отсчёта, SD-путь и т.п. не теряются, пока часы "спят".
++// ---------------------------------------------------------
++void screen_aod_enter(void)
++{
++    if (s_in_aod) return;
+     s_in_aod = true;
++    nav_push_ex("aod", LV_SCR_LOAD_ANIM_FADE_ON, 200);
+     ESP_LOGI(TAG, "Entered AOD watchface");
+ }
+ 
+ void screen_aod_exit(void)
+ {
+     if (!s_in_aod) return;
+-
+-    if (s_tick_timer != NULL) {
+-        lv_timer_del(s_tick_timer);
+-        s_tick_timer = NULL;
+-    }
+-
+-    lv_obj_t *target = (s_prev_screen != NULL) ? s_prev_screen : ui_ScreenHome;
+-    if (target == ui_ScreenHome && ui_ScreenHome == NULL)
+-        ui_ScreenHome_screen_init();
+-    lv_screen_load_anim(target, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, false);
+-
+     s_in_aod = false;
++    nav_pop_ex(LV_SCR_LOAD_ANIM_FADE_ON, 200);
+     ESP_LOGI(TAG, "Exited AOD watchface");
+ }
+ 
++void screen_aod_exit_to_home(void)
++{
++    if (!s_in_aod) return;
++    s_in_aod = false;
++    nav_back_to_home_ex(LV_SCR_LOAD_ANIM_FADE_ON, 200);
++    ESP_LOGI(TAG, "Exited AOD watchface -> home");
++}
++
+ static void wrist_sleep_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
+     (void)arg; (void)base; (void)id; (void)event_data;
+@@ -97,9 +111,10 @@ static void wrist_raise_handler(void *arg, esp_event_base_t base, int32_t id, vo
+     screen_aod_exit();
+ }
+ 
++// Постоянные триггеры (не принадлежат экрану, поэтому destroy() их не снимает).
+ void screen_aod_logic_init(void)
+ {
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL, NULL);
+-    ESP_LOGI(TAG, "AOD logic initialized");
+-}
+\ No newline at end of file
++    app_evt_subscribe(&s_sub_sleep, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL);
++    app_evt_subscribe(&s_sub_raise, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL);
++    ESP_LOGI(TAG, "AOD triggers armed");
++}
+diff --git a/components/screen_aod/screen_aod_logic.h b/components/screen_aod/screen_aod_logic.h
+index 7c6a91c..0f2ebe4 100644
+--- a/components/screen_aod/screen_aod_logic.h
++++ b/components/screen_aod/screen_aod_logic.h
+@@ -1,18 +1,28 @@
+ #pragma once
+ 
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+-// Регистрирует обработчики EVT_MOTION_WRIST_SLEEP / EVT_MOTION_WRIST_RAISE
+-// и подключает автообновление стрелок AOD (раз в секунду, только пока
+-// экран AOD активен - в остальное время таймер остановлен и не тратит CPU).
++// Дескриптор для app_nav: { "aod", screen_aod_create, screen_aod_destroy }.
++// create() строит часы и запускает секундный таймер, destroy() его удаляет.
++lv_obj_t *screen_aod_create(void);
++void screen_aod_destroy(lv_obj_t *scr);
++
++// Регистрирует постоянные триггеры EVT_MOTION_WRIST_SLEEP / EVT_MOTION_WRIST_RAISE.
++// Они не принадлежат экрану и живут весь uptime; сами экран не создают, а
++// просто зовут screen_aod_enter()/screen_aod_exit().
+ void screen_aod_logic_init(void);
+ 
+-// Можно вызывать и напрямую (например, из svc_screen_sleep по таймеру
+-// бездействия, если он у вас не завязан на события wrist raise/sleep).
+-void screen_aod_enter(void);   // войти в режим AOD (запомнит текущий экран)
+-void screen_aod_exit(void);    // выйти из AOD, вернуться на запомненный экран
++// AOD - оверлей: enter = nav_push("aod"), exit = nav_pop() (вернёт тот экран,
++// с которого уходили). Можно вызывать из svc_screen_sleep. Идемпотентны.
++void screen_aod_enter(void);
++void screen_aod_exit(void);
++
++// Выйти из AOD сразу на home (касание по экрану AOD).
++void screen_aod_exit_to_home(void);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+diff --git a/components/screen_aod/ui_ScreenAOD.c b/components/screen_aod/ui_ScreenAOD.c
+index aae4227..63b03c6 100644
+--- a/components/screen_aod/ui_ScreenAOD.c
++++ b/components/screen_aod/ui_ScreenAOD.c
+@@ -1,4 +1,7 @@
+ #include "ui.h"
++#include "app_nav.h"
++#include "screen_aod_logic.h"
++#include "svc_screen_sleep.h"
+ #include <math.h>
+ 
+ lv_obj_t * ui_ScreenAOD = NULL;
+@@ -45,9 +48,10 @@ void ui_event_ScreenAOD(lv_event_t * e)
+         if (event_code == LV_EVENT_GESTURE) {
+             lv_indev_wait_release(lv_indev_active());
+         }
+-        extern void svc_screen_sleep_wake_up(void);
++        // Касание по AOD всегда ведёт на home (как и раньше): сначала уходим
++        // из AOD на home, потом будим экран (wake_up видит, что AOD уже закрыт).
++        screen_aod_exit_to_home();
+         svc_screen_sleep_wake_up();
+-        _ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, &ui_ScreenHome_screen_init);
+     }
+ }
+ 
+diff --git a/components/screen_aod/ui_ScreenAOD.h b/components/screen_aod/ui_ScreenAOD.h
+index d77639c..93ed452 100644
+--- a/components/screen_aod/ui_ScreenAOD.h
++++ b/components/screen_aod/ui_ScreenAOD.h
+@@ -7,7 +7,6 @@ extern "C" {
+ 
+ extern void ui_ScreenAOD_screen_init(void);
+ extern void ui_ScreenAOD_screen_destroy(void);
+-extern void ui_ScreenAOD_full_init(void);
+ extern void ui_event_ScreenAOD(lv_event_t * e);
+ 
+ extern lv_obj_t * ui_ScreenAOD;
+diff --git a/components/screen_calc/CMakeLists.txt b/components/screen_calc/CMakeLists.txt
+index 18e82ad..f8dc3b7 100644
+--- a/components/screen_calc/CMakeLists.txt
++++ b/components/screen_calc/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_calc/screen_calc_logic.c b/components/screen_calc/screen_calc_logic.c
+index c59e80f..e847fe1 100644
+--- a/components/screen_calc/screen_calc_logic.c
++++ b/components/screen_calc/screen_calc_logic.c
+@@ -222,7 +222,7 @@ static void bind_button(lv_obj_t *btn, const char *action, bool is_op, bool is_e
+     }
+ }
+ 
+-void screen_calc_logic_init(void)
++static void logic_init(void)
+ {
+     UI_APPLY_SCREEN_BG(ui_ScreenCalc);
+     lv_obj_set_style_text_color(ui_Label19, lv_color_hex(UI_COLOR_TEXT_PRIMARY), LV_PART_MAIN);
+@@ -256,8 +256,21 @@ void screen_calc_logic_init(void)
+     ESP_LOGI(TAG, "Calculator screen logic initialized");
+ }
+ 
+-void ui_ScreenCalc_full_init(void)
++static void logic_deinit(void)
++{
++    // ничего своего: ни подписок, ни таймеров; ui_ScreenCalc_screen_destroy() обнулит ui_*
++}
++
++lv_obj_t *screen_calc_create(void)
+ {
+     ui_ScreenCalc_screen_init();
+-    screen_calc_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenCalc;
++}
++
++void screen_calc_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenCalc
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenCalc_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_calc/screen_calc_logic.h b/components/screen_calc/screen_calc_logic.h
+index e792f81..fef24f0 100644
+--- a/components/screen_calc/screen_calc_logic.h
++++ b/components/screen_calc/screen_calc_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenCalc".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenCalc уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_calc_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenCalc_full_init(void);
++// Дескриптор для app_nav: { "calc", screen_calc_create, screen_calc_destroy }.
++//
++// create():  строит дерево ui_ScreenCalc, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_calc_create(void);
++void screen_calc_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_calc/ui_ScreenCalc.c b/components/screen_calc/ui_ScreenCalc.c
+index 6e0cbb3..a21c4ee 100644
+--- a/components/screen_calc/ui_ScreenCalc.c
++++ b/components/screen_calc/ui_ScreenCalc.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenCalc = NULL;
+ lv_obj_t * ui_Container1 = NULL;
+@@ -57,11 +58,11 @@ void ui_event_ScreenCalc(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalendar_full_init);
++nav_replace_ex("calendar", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenTimeUtils_full_init);
++nav_replace_ex("timeutils", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_calc/ui_ScreenCalc.h b/components/screen_calc/ui_ScreenCalc.h
+index 8a53dc5..9ddf11d 100644
+--- a/components/screen_calc/ui_ScreenCalc.h
++++ b/components/screen_calc/ui_ScreenCalc.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenCalc
+ extern void ui_ScreenCalc_screen_init(void);
+ extern void ui_ScreenCalc_screen_destroy(void);
+-extern void ui_ScreenCalc_full_init(void);
+ extern void ui_event_ScreenCalc(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenCalc;
+ extern lv_obj_t * ui_Container1;
+diff --git a/components/screen_calendar/CMakeLists.txt b/components/screen_calendar/CMakeLists.txt
+index 8aa74cc..0d8d37c 100644
+--- a/components/screen_calendar/CMakeLists.txt
++++ b/components/screen_calendar/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_calendar/screen_calendar_logic.c b/components/screen_calendar/screen_calendar_logic.c
+index b2acfe5..6717845 100644
+--- a/components/screen_calendar/screen_calendar_logic.c
++++ b/components/screen_calendar/screen_calendar_logic.c
+@@ -28,7 +28,7 @@ static void apply_theme(void)
+     lv_obj_set_style_bg_opa(ui_Calendar, LV_OPA_50, LV_PART_ITEMS | LV_STATE_DISABLED);
+ }
+ 
+-void screen_calendar_logic_init(void)
++static void logic_init(void)
+ {
+     apply_theme();
+ 
+@@ -41,8 +41,21 @@ void screen_calendar_logic_init(void)
+     ESP_LOGI(TAG, "Calendar screen logic initialized");
+ }
+ 
+-void ui_ScreenCalendar_full_init(void)
++static void logic_deinit(void)
++{
++    // ничего своего: ни подписок, ни таймеров; ui_ScreenCalendar_screen_destroy() обнулит ui_*
++}
++
++lv_obj_t *screen_calendar_create(void)
+ {
+     ui_ScreenCalendar_screen_init();
+-    screen_calendar_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenCalendar;
++}
++
++void screen_calendar_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenCalendar
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenCalendar_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_calendar/screen_calendar_logic.h b/components/screen_calendar/screen_calendar_logic.h
+index 965ab7b..004e2ab 100644
+--- a/components/screen_calendar/screen_calendar_logic.h
++++ b/components/screen_calendar/screen_calendar_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenCalendar".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenCalendar уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_calendar_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenCalendar_full_init(void);
++// Дескриптор для app_nav: { "calendar", screen_calendar_create, screen_calendar_destroy }.
++//
++// create():  строит дерево ui_ScreenCalendar, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_calendar_create(void);
++void screen_calendar_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_calendar/ui_ScreenCalendar.c b/components/screen_calendar/ui_ScreenCalendar.c
+index f2f7a57..9ad817d 100644
+--- a/components/screen_calendar/ui_ScreenCalendar.c
++++ b/components/screen_calendar/ui_ScreenCalendar.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenCalendar = NULL;
+ lv_obj_t * ui_Calendar = NULL;
+@@ -15,15 +16,15 @@ void ui_event_ScreenCalendar(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenHome_screen_init);
++nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalc_full_init);
++nav_replace_ex("calc", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenEvents, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenEvents_full_init);
++nav_replace_ex("events", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
+ }
+ }
+ 
+diff --git a/components/screen_calendar/ui_ScreenCalendar.h b/components/screen_calendar/ui_ScreenCalendar.h
+index e68677c..465758e 100644
+--- a/components/screen_calendar/ui_ScreenCalendar.h
++++ b/components/screen_calendar/ui_ScreenCalendar.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenCalendar
+ extern void ui_ScreenCalendar_screen_init(void);
+ extern void ui_ScreenCalendar_screen_destroy(void);
+-extern void ui_ScreenCalendar_full_init(void);
+ extern void ui_event_ScreenCalendar(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenCalendar;
+ extern lv_obj_t * ui_Calendar;
+diff --git a/components/screen_events/CMakeLists.txt b/components/screen_events/CMakeLists.txt
+index 87d0f99..150dc1b 100644
+--- a/components/screen_events/CMakeLists.txt
++++ b/components/screen_events/CMakeLists.txt
+@@ -9,5 +9,6 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         ui_widgets
+ )
+diff --git a/components/screen_events/screen_events_logic.c b/components/screen_events/screen_events_logic.c
+index 2c37f2e..e2368b2 100644
+--- a/components/screen_events/screen_events_logic.c
++++ b/components/screen_events/screen_events_logic.c
+@@ -14,7 +14,8 @@
+ // можно было переиспользовать без изменений.
+ 
+ static const char *TAG = "SCREEN_EVENTS";
+-static card_feed_t s_feed;
++static card_feed_t s_feed = NULL;   // переживает экран (см. screen_events_service_init)
++static app_evt_sub_t s_sub_rx, s_sub_del;
+ 
+ static void apply_theme(void)
+ {
+@@ -24,7 +25,8 @@ static void apply_theme(void)
+ 
+ static void build_feed(void)
+ {
+-    s_feed = card_feed_create(ui_ScreenEvents, 0); // события не исчезают сами - только вручную/по del от телефона
++    // Лента живёт дольше экрана, здесь её только подключаем к свежему экрану.
++    card_feed_attach(s_feed, ui_ScreenEvents);
+     lv_obj_t *container = card_feed_get_container(s_feed);
+     lv_obj_set_size(container, lv_pct(100), lv_pct(78));
+     lv_obj_set_align(container, LV_ALIGN_BOTTOM_MID);
+@@ -47,6 +49,7 @@ static void event_to_card(const notify_data *n, card_feed_item_t *out, char *tim
+ 
+ static void ble_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
++    if (s_feed == NULL) return;
+     (void)arg; (void)base;
+     if (id == EVT_BLE_EVENT_RX) {
+         notify_data *n = (notify_data *)event_data;
+@@ -61,19 +64,40 @@ static void ble_event_handler(void *arg, esp_event_base_t base, int32_t id, void
+     }
+ }
+ 
+-void screen_events_logic_init(void)
++// Сборщик данных: вызывается один раз при старте приложения (app_ui_init) и
++// принимает события календаря и когда экрана нет. Это слой данных, а не подписка экрана,
++// поэтому destroy() его не трогает. Идемпотентна.
++void screen_events_service_init(void)
+ {
++    if (s_feed != NULL) return;
++    s_feed = card_feed_create_detached(0);
++    app_evt_subscribe(&s_sub_rx, EVT_BLE_EVENT_RX, ble_event_handler, NULL);
++    app_evt_subscribe(&s_sub_del, EVT_BLE_EVENT_DEL, ble_event_handler, NULL);
++}
++
++static void logic_init(void)
++{
++    screen_events_service_init();   // на случай, если экран создали раньше сервиса
+     apply_theme();
+     build_feed();
+-
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_EVENT_RX, ble_event_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_EVENT_DEL, ble_event_handler, NULL, NULL);
+-
+     ESP_LOGI(TAG, "Events screen logic initialized");
+ }
+ 
+-void ui_ScreenEvents_full_init(void)
++static void logic_deinit(void)
++{
++    card_feed_detach(s_feed);   // лента (и её карточки) остаётся жить в скрытом контейнере
++}
++
++lv_obj_t *screen_events_create(void)
+ {
+     ui_ScreenEvents_screen_init();
+-    screen_events_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenEvents;
++}
++
++void screen_events_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenEvents
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenEvents_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_events/screen_events_logic.h b/components/screen_events/screen_events_logic.h
+index 4a85a57..f5f6684 100644
+--- a/components/screen_events/screen_events_logic.h
++++ b/components/screen_events/screen_events_logic.h
+@@ -1,17 +1,23 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenEvents".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenEvents уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_events_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenEvents_full_init(void);
++// Запускает приём события календаря в ленту. Вызвать один раз при старте (app_ui_init).
++// Подписки сервиса постоянные и не относятся к жизненному циклу экрана.
++void screen_events_service_init(void);
++
++// Дескриптор для app_nav: { "events", screen_events_create, screen_events_destroy }.
++//
++// create():  строит дерево ui_ScreenEvents, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_events_create(void);
++void screen_events_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_events/ui_ScreenEvents.c b/components/screen_events/ui_ScreenEvents.c
+index 8c708c3..18239c9 100644
+--- a/components/screen_events/ui_ScreenEvents.c
++++ b/components/screen_events/ui_ScreenEvents.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenEvents = NULL;
+ lv_obj_t * ui_Label18 = NULL;
+@@ -14,7 +15,7 @@ void ui_event_Label18(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenCalendar_full_init);
++nav_replace_ex("calendar", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ }
+ 
+diff --git a/components/screen_events/ui_ScreenEvents.h b/components/screen_events/ui_ScreenEvents.h
+index c2515ee..c79302d 100644
+--- a/components/screen_events/ui_ScreenEvents.h
++++ b/components/screen_events/ui_ScreenEvents.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenEvents
+ extern void ui_ScreenEvents_screen_init(void);
+ extern void ui_ScreenEvents_screen_destroy(void);
+-extern void ui_ScreenEvents_full_init(void);
+ extern lv_obj_t * ui_ScreenEvents;
+ extern void ui_event_Label18(lv_event_t * e);
+ extern lv_obj_t * ui_Label18;
+diff --git a/components/screen_home/CMakeLists.txt b/components/screen_home/CMakeLists.txt
+index 6420473..d16825c 100644
+--- a/components/screen_home/CMakeLists.txt
++++ b/components/screen_home/CMakeLists.txt
+@@ -9,6 +9,7 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         esp_event
+         svc_screen_sleep
+ )
+diff --git a/components/screen_home/screen_home_logic.c b/components/screen_home/screen_home_logic.c
+index b703175..e0744ab 100644
+--- a/components/screen_home/screen_home_logic.c
++++ b/components/screen_home/screen_home_logic.c
+@@ -1,5 +1,6 @@
+ #include "screen_home_logic.h"
+ #include "ui.h"
++#include "app_nav.h"
+ #include "app_events.h"
+ #include "esp_event.h"
+ #include "esp_log.h"
+@@ -11,11 +12,16 @@
+ static const char *TAG = "SCREEN_HOME";
+ 
+ // --- Виджет шагомера, который мы достраиваем внутри ui_Panel1 ---
+-static lv_obj_t *ui_HomeArcSteps;
+-static lv_obj_t *ui_HomeLabelSteps;
++static lv_obj_t *ui_HomeArcSteps = NULL;
++static lv_obj_t *ui_HomeLabelSteps = NULL;
+ 
+ #define STEPS_GOAL 10000
+ 
++// Всё, что home держит снаружи дерева виджетов. Home резидентный, но
++// destroy() симметричен create() (нужен тестам и возможному shutdown).
++static lv_timer_t *s_clock_timer;
++static app_evt_sub_t s_sub_battery, s_sub_steps, s_sub_raise, s_sub_sleep;
++
+ // =========================================================
+ // ДАТА / ВРЕМЯ (перенесено из старого home_tile.c)
+ // =========================================================
+@@ -162,6 +168,7 @@ static void build_pedometer_widget(void)
+ static void battery_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
+     (void)arg; (void)base; (void)id;
++    if (ui_Label3 == NULL) return;
+     battery_data_t *bat = (battery_data_t *)event_data;
+     char buf[24];
+     snprintf(buf, sizeof(buf), "%d%%\n%.2fV", bat->percent, bat->voltage);
+@@ -171,7 +178,7 @@ static void battery_event_handler(void *arg, esp_event_base_t base, int32_t id,
+ static void step_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
+     (void)arg; (void)base; (void)id;
+-    if (ui_HomeLabelSteps == NULL || !lv_obj_is_valid(ui_HomeLabelSteps)) return;
++    if (ui_HomeLabelSteps == NULL) return;
+ 
+     motion_step_data_t *data = (motion_step_data_t *)event_data;
+     uint32_t steps = data->steps;
+@@ -199,17 +206,60 @@ static void wrist_sleep_handler(void *arg, esp_event_base_t base, int32_t id, vo
+ // =========================================================
+ // ИНИЦИАЛИЗАЦИЯ
+ // =========================================================
+-void screen_home_logic_init(void)
++// Пока home закрыт другим экраном, секундный таймер ему не нужен: ставим на
++// паузу (экономия пробуждений CPU), при возврате - сразу обновляем часы.
++static void home_visibility_cb(lv_event_t *e)
++{
++    if (s_clock_timer == NULL) return;
++    if (lv_event_get_code(e) == LV_EVENT_SCREEN_LOADED) {
++        update_clock_labels();
++        lv_timer_resume(s_clock_timer);
++    } else {
++        lv_timer_pause(s_clock_timer);
++    }
++}
++
++static void logic_init(void)
+ {
+     apply_theme();
+     build_pedometer_widget();
+     update_clock_labels();
+-    lv_timer_create(clock_timer_cb, 1000, NULL);
++    s_clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
++    lv_obj_add_event_cb(ui_ScreenHome, home_visibility_cb, LV_EVENT_SCREEN_LOADED, NULL);
++    lv_obj_add_event_cb(ui_ScreenHome, home_visibility_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+ 
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BATTERY_UPDATED, battery_event_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_STEP_UPDATED, step_event_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL, NULL);
++    app_evt_subscribe(&s_sub_battery, EVT_BATTERY_UPDATED, battery_event_handler, NULL);
++    app_evt_subscribe(&s_sub_steps, EVT_MOTION_STEP_UPDATED, step_event_handler, NULL);
++    app_evt_subscribe(&s_sub_raise, EVT_MOTION_WRIST_RAISE, wrist_raise_handler, NULL);
++    app_evt_subscribe(&s_sub_sleep, EVT_MOTION_WRIST_SLEEP, wrist_sleep_handler, NULL);
+ 
+     ESP_LOGI(TAG, "Home screen logic initialized");
+ }
++
++static void logic_deinit(void)
++{
++    // 1) подписки: после возврата ни один обработчик не работает и не стартует
++    app_evt_unsubscribe(&s_sub_battery);
++    app_evt_unsubscribe(&s_sub_steps);
++    app_evt_unsubscribe(&s_sub_raise);
++    app_evt_unsubscribe(&s_sub_sleep);
++    // 2) таймеры
++    if (s_clock_timer) { lv_timer_delete(s_clock_timer); s_clock_timer = NULL; }
++    // 3) указатели на виджеты, которые мы достраивали (остальные обнулит ui_*_screen_destroy)
++    ui_HomeArcSteps = NULL;
++    ui_HomeLabelSteps = NULL;
++}
++
++lv_obj_t *screen_home_create(void)
++{
++    ui_ScreenHome_screen_init();
++    logic_init();
++    return ui_ScreenHome;
++}
++
++void screen_home_destroy(lv_obj_t *scr)
++{
++    (void)scr;
++    logic_deinit();
++    ui_ScreenHome_screen_destroy();   // lv_obj_del + обнуление ui_Label*/ui_Panel1
++}
+diff --git a/components/screen_home/screen_home_logic.h b/components/screen_home/screen_home_logic.h
+index 5daf584..598a77c 100644
+--- a/components/screen_home/screen_home_logic.h
++++ b/components/screen_home/screen_home_logic.h
+@@ -1,13 +1,21 @@
+ #pragma once
+ 
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+-// Строит виджет шагомера внутри ui_Panel1, запускает тикающие часы
+-// и подписывается на события батареи/шагов/запястья.
+-// Вызывать один раз из main, после ui_ScreenHome_screen_init() (т.е. после ui_init()).
+-void screen_home_logic_init(void);
++// Дескриптор для app_nav: { "home", screen_home_create, screen_home_destroy }.
++//
++// create():  строит дерево ui_ScreenHome, достраивает виджет шагомера, запускает
++//            часы и подписывается на события батареи/шагов/запястья.
++// destroy(): снимает ВСЕ подписки, удаляет таймер, обнуляет указатели, удаляет экран.
++//
++// Home резидентный: создаётся один раз через nav_push("home") и навигатором
++// никогда не уничтожается.
++lv_obj_t *screen_home_create(void);
++void screen_home_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+diff --git a/components/screen_home/ui_ScreenHome.c b/components/screen_home/ui_ScreenHome.c
+index f9b61b6..a4774fd 100644
+--- a/components/screen_home/ui_ScreenHome.c
++++ b/components/screen_home/ui_ScreenHome.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ LV_FONT_DECLARE(lv_font_montserrat_26_cyrillic) 
+ 
+@@ -22,19 +23,19 @@ void ui_event_ScreenHome(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenWeather_full_init);
++nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenNotify, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenNotify_full_init);
++nav_replace_ex("notify", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenPhone_full_init);
++nav_replace_ex("phone", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenCalendar, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenCalendar_full_init);
++nav_replace_ex("calendar", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_home/ui_ScreenHome.h b/components/screen_home/ui_ScreenHome.h
+index 94b2e0b..458b489 100644
+--- a/components/screen_home/ui_ScreenHome.h
++++ b/components/screen_home/ui_ScreenHome.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenHome
+ extern void ui_ScreenHome_screen_init(void);
+ extern void ui_ScreenHome_screen_destroy(void);
+-extern void ui_ScreenHome_full_init(void);
+ extern void ui_event_ScreenHome(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenHome;
+ extern lv_obj_t * ui_Label1;
+diff --git a/components/screen_ir/CMakeLists.txt b/components/screen_ir/CMakeLists.txt
+index b6cea8a..f560b05 100644
+--- a/components/screen_ir/CMakeLists.txt
++++ b/components/screen_ir/CMakeLists.txt
+@@ -9,5 +9,6 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         svc_ir_transmit
+ )
+diff --git a/components/screen_ir/screen_ir_logic.c b/components/screen_ir/screen_ir_logic.c
+index affbc76..e1aa347 100644
+--- a/components/screen_ir/screen_ir_logic.c
++++ b/components/screen_ir/screen_ir_logic.c
+@@ -19,9 +19,16 @@ typedef struct {
+ // Таблица [устройство][команда].
+ static nec_code_t s_code_table[IR_DEVICE_COUNT][IR_CMD_COUNT] = {0};
+ 
+-void screen_ir_logic_init(void)
++static bool s_ir_ready = false;
++
++static void logic_init(void)
+ {
+-    svc_ir_transmit_init(IR_TX_GPIO);
++    // RMT-канал у svc_ir_transmit поднимается один раз на весь uptime
++    // (повторный init сервис отвергает), поэтому экран его не трогает при пересоздании.
++    if (!s_ir_ready) {
++        svc_ir_transmit_init(IR_TX_GPIO);
++        s_ir_ready = true;
++    }
+     ESP_LOGI(TAG, "IR remote screen logic initialized on GPIO%d", IR_TX_GPIO);
+ }
+ 
+@@ -36,8 +43,21 @@ void screen_ir_handle_button(ir_device_t device, ir_cmd_id_t cmd)
+     svc_ir_send_nec(code->address, code->command);
+ }
+ 
+-void ui_ScreenIR_full_init(void)
++static void logic_deinit(void)
++{
++    // у экрана нет подписок и таймеров; RMT-канал сервиса живёт вместе с приложением
++}
++
++lv_obj_t *screen_ir_create(void)
+ {
+     ui_ScreenIR_screen_init();
+-    screen_ir_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenIR;
++}
++
++void screen_ir_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenIR
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenIR_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_ir/screen_ir_logic.h b/components/screen_ir/screen_ir_logic.h
+index 85c9418..b715431 100644
+--- a/components/screen_ir/screen_ir_logic.h
++++ b/components/screen_ir/screen_ir_logic.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ #include <stdint.h>
++#include "lvgl.h"
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -36,15 +37,14 @@ IR_CMD_EXTRA_8,
+ IR_CMD_COUNT,
+ } ir_cmd_id_t;
+ 
+-// Инициализация: поднимает RMT TX (см. svc_ir_transmit) на заданном GPIO.
+-void screen_ir_logic_init(void);
++// Дескриптор для app_nav: { "ir", screen_ir_create, screen_ir_destroy }.
++// create() при первом вызове поднимает RMT TX (см. svc_ir_transmit) на IR_TX_GPIO.
++lv_obj_t *screen_ir_create(void);
++void screen_ir_destroy(lv_obj_t *scr);
+ 
+ // Вызывается из ui_ScreenIR.c по клику на кнопку.
+ void screen_ir_handle_button(ir_device_t device, ir_cmd_id_t cmd);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenIR_full_init(void);
+-
+ #ifdef __cplusplus
+ } /*extern "C"*/
+ #endif
+\ No newline at end of file
+diff --git a/components/screen_ir/ui_ScreenIR.c b/components/screen_ir/ui_ScreenIR.c
+index 5bf52e8..ac03bc8 100644
+--- a/components/screen_ir/ui_ScreenIR.c
++++ b/components/screen_ir/ui_ScreenIR.c
+@@ -3,6 +3,7 @@
+ // скроллируемый список кнопок-строк (на экран помещается ~6 штук).
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ #include "screen_ir_logic.h"
+ 
+ lv_obj_t * ui_ScreenIR = NULL;
+@@ -15,7 +16,7 @@ void ui_event_ScreenIR(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if (event_code == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSys_full_init);
++nav_replace_ex("sys", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ }
+ 
+@@ -30,8 +31,12 @@ typedef struct {
+ 
+ static void remote_row_event_cb(lv_event_t * e)
+ {
+-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+     ir_btn_user_data_t * ud = (ir_btn_user_data_t *)lv_event_get_user_data(e);
++    if (lv_event_get_code(e) == LV_EVENT_DELETE) {   // экран пересоздаётся: чистим за собой
++        lv_free(ud);
++        return;
++    }
++    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+     screen_ir_handle_button(ud->device, ud->cmd);
+ }
+ 
+@@ -50,7 +55,7 @@ static void make_remote_row(lv_obj_t * parent, const char * symbol, const char *
+     ir_btn_user_data_t * ud = lv_malloc(sizeof(ir_btn_user_data_t));
+     ud->device = device;
+     ud->cmd = cmd;
+-    lv_obj_add_event_cb(row, remote_row_event_cb, LV_EVENT_CLICKED, ud);
++    lv_obj_add_event_cb(row, remote_row_event_cb, LV_EVENT_ALL, ud);
+ 
+     lv_obj_t * lbl_icon = lv_label_create(row);
+     lv_label_set_text(lbl_icon, symbol);
+diff --git a/components/screen_ir/ui_ScreenIR.h b/components/screen_ir/ui_ScreenIR.h
+index da90034..59bcf19 100644
+--- a/components/screen_ir/ui_ScreenIR.h
++++ b/components/screen_ir/ui_ScreenIR.h
+@@ -12,7 +12,6 @@ extern "C" {
+ // SCREEN: ui_ScreenIR
+ extern void ui_ScreenIR_screen_init(void);
+ extern void ui_ScreenIR_screen_destroy(void);
+-extern void ui_ScreenIR_full_init(void);
+ extern void ui_event_ScreenIR(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenIR;
+ extern lv_obj_t * ui_IRTabView;
+diff --git a/components/screen_news/CMakeLists.txt b/components/screen_news/CMakeLists.txt
+index 63b7df7..35903d7 100644
+--- a/components/screen_news/CMakeLists.txt
++++ b/components/screen_news/CMakeLists.txt
+@@ -9,5 +9,6 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         ui_widgets
+ )
+diff --git a/components/screen_news/screen_news_logic.c b/components/screen_news/screen_news_logic.c
+index 7592243..ca622e5 100644
+--- a/components/screen_news/screen_news_logic.c
++++ b/components/screen_news/screen_news_logic.c
+@@ -12,7 +12,8 @@
+ // См. components/docs/ble_protocol_additions.md
+ 
+ static const char *TAG = "SCREEN_NEWS";
+-static card_feed_t s_feed;
++static card_feed_t s_feed = NULL;   // переживает экран (см. screen_news_service_init)
++static app_evt_sub_t s_sub_rx;
+ 
+ static void apply_theme(void)
+ {
+@@ -22,7 +23,8 @@ static void apply_theme(void)
+ 
+ static void build_feed(void)
+ {
+-    s_feed = card_feed_create(ui_ScreenNews, 0); // новости живут, пока их не смахнут
++    // Лента живёт дольше экрана, здесь её только подключаем к свежему экрану.
++    card_feed_attach(s_feed, ui_ScreenNews);
+     lv_obj_t *container = card_feed_get_container(s_feed);
+     lv_obj_set_size(container, lv_pct(100), lv_pct(78));
+     lv_obj_set_align(container, LV_ALIGN_BOTTOM_MID);
+@@ -30,6 +32,7 @@ static void build_feed(void)
+ 
+ static void news_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
++    if (s_feed == NULL) return;
+     (void)arg; (void)base; (void)id;
+     notify_data *n = (notify_data *)event_data;
+ 
+@@ -50,18 +53,39 @@ static void news_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
+     card_feed_add(s_feed, &item);
+ }
+ 
+-void screen_news_logic_init(void)
++// Сборщик данных: вызывается один раз при старте приложения (app_ui_init) и
++// принимает новости и когда экрана нет. Это слой данных, а не подписка экрана,
++// поэтому destroy() его не трогает. Идемпотентна.
++void screen_news_service_init(void)
+ {
++    if (s_feed != NULL) return;
++    s_feed = card_feed_create_detached(0);
++    app_evt_subscribe(&s_sub_rx, EVT_BLE_NEWS_RX, news_event_handler, NULL);
++}
++
++static void logic_init(void)
++{
++    screen_news_service_init();   // на случай, если экран создали раньше сервиса
+     apply_theme();
+     build_feed();
+-
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NEWS_RX, news_event_handler, NULL, NULL);
+-
+     ESP_LOGI(TAG, "News screen logic initialized");
+ }
+ 
+-void ui_ScreenNews_full_init(void)
++static void logic_deinit(void)
++{
++    card_feed_detach(s_feed);   // лента (и её карточки) остаётся жить в скрытом контейнере
++}
++
++lv_obj_t *screen_news_create(void)
+ {
+     ui_ScreenNews_screen_init();
+-    screen_news_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenNews;
++}
++
++void screen_news_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenNews
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenNews_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_news/screen_news_logic.h b/components/screen_news/screen_news_logic.h
+index 6c55b85..6b89ca8 100644
+--- a/components/screen_news/screen_news_logic.h
++++ b/components/screen_news/screen_news_logic.h
+@@ -1,17 +1,23 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenNews".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenNews уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_news_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenNews_full_init(void);
++// Запускает приём новости в ленту. Вызвать один раз при старте (app_ui_init).
++// Подписки сервиса постоянные и не относятся к жизненному циклу экрана.
++void screen_news_service_init(void);
++
++// Дескриптор для app_nav: { "news", screen_news_create, screen_news_destroy }.
++//
++// create():  строит дерево ui_ScreenNews, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_news_create(void);
++void screen_news_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_news/ui_ScreenNews.c b/components/screen_news/ui_ScreenNews.c
+index 22451f9..7f1a262 100644
+--- a/components/screen_news/ui_ScreenNews.c
++++ b/components/screen_news/ui_ScreenNews.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenNews = NULL;
+ lv_obj_t * ui_Label16 = NULL;
+@@ -14,7 +15,7 @@ void ui_event_ScreenNews(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeather_full_init);
++nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_news/ui_ScreenNews.h b/components/screen_news/ui_ScreenNews.h
+index f820fa7..da24a9c 100644
+--- a/components/screen_news/ui_ScreenNews.h
++++ b/components/screen_news/ui_ScreenNews.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenNews
+ extern void ui_ScreenNews_screen_init(void);
+ extern void ui_ScreenNews_screen_destroy(void);
+-extern void ui_ScreenNews_full_init(void);
+ extern void ui_event_ScreenNews(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenNews;
+ extern lv_obj_t * ui_Label16;
+diff --git a/components/screen_notify/CMakeLists.txt b/components/screen_notify/CMakeLists.txt
+index 1dd79c9..3be4f65 100644
+--- a/components/screen_notify/CMakeLists.txt
++++ b/components/screen_notify/CMakeLists.txt
+@@ -9,5 +9,6 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         ui_widgets
+ )
+diff --git a/components/screen_notify/screen_notify_logic.c b/components/screen_notify/screen_notify_logic.c
+index 17c852e..c6d83a2 100644
+--- a/components/screen_notify/screen_notify_logic.c
++++ b/components/screen_notify/screen_notify_logic.c
+@@ -9,7 +9,8 @@
+ #include <string.h>
+ 
+ static const char *TAG = "SCREEN_NOTIFY";
+-static card_feed_t s_feed;
++static card_feed_t s_feed = NULL;   // переживает экран (см. screen_notify_service_init)
++static app_evt_sub_t s_sub_rx, s_sub_del;
+ 
+ static void apply_theme(void)
+ {
+@@ -17,15 +18,10 @@ static void apply_theme(void)
+     lv_obj_set_y(ui_Label8, -210); // поднимаем заголовок, освобождая место под ленту
+ }
+ 
+-void ui_ScreenNotify_full_init(void)
+-{
+-    ui_ScreenNotify_screen_init();
+-    screen_notify_logic_init();
+-}
+-
+ static void build_feed(void)
+ {
+-    s_feed = card_feed_create(ui_ScreenNotify, 600000); // автоудаление через 10 минут
++    // Лента живёт дольше экрана, здесь её только подключаем к свежему экрану.
++    card_feed_attach(s_feed, ui_ScreenNotify);
+     lv_obj_t *container = card_feed_get_container(s_feed);
+     lv_obj_set_size(container, lv_pct(100), lv_pct(78));
+     lv_obj_set_align(container, LV_ALIGN_BOTTOM_MID);
+@@ -48,6 +44,7 @@ static void notify_to_card(const notify_data *n, card_feed_item_t *out, char *ti
+ 
+ static void ble_notify_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
++    if (s_feed == NULL) return;
+     (void)arg; (void)base;
+     if (id == EVT_BLE_NOTIFY_RX) {
+         notify_data *n = (notify_data *)event_data;
+@@ -62,13 +59,40 @@ static void ble_notify_event_handler(void *arg, esp_event_base_t base, int32_t i
+     }
+ }
+ 
+-void screen_notify_logic_init(void)
++// Сборщик данных: вызывается один раз при старте приложения (app_ui_init) и
++// принимает уведомления и когда экрана нет. Это слой данных, а не подписка экрана,
++// поэтому destroy() его не трогает. Идемпотентна.
++void screen_notify_service_init(void)
+ {
++    if (s_feed != NULL) return;
++    s_feed = card_feed_create_detached(600000);
++    app_evt_subscribe(&s_sub_rx, EVT_BLE_NOTIFY_RX, ble_notify_event_handler, NULL);
++    app_evt_subscribe(&s_sub_del, EVT_BLE_NOTIFY_DEL, ble_notify_event_handler, NULL);
++}
++
++static void logic_init(void)
++{
++    screen_notify_service_init();   // на случай, если экран создали раньше сервиса
+     apply_theme();
+     build_feed();
++    ESP_LOGI(TAG, "Notify screen logic initialized");
++}
+ 
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_RX, ble_notify_event_handler, NULL, NULL);
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_NOTIFY_DEL, ble_notify_event_handler, NULL, NULL);
++static void logic_deinit(void)
++{
++    card_feed_detach(s_feed);   // лента (и её карточки) остаётся жить в скрытом контейнере
++}
+ 
+-    ESP_LOGI(TAG, "Notify screen logic initialized");
+-}
+\ No newline at end of file
++lv_obj_t *screen_notify_create(void)
++{
++    ui_ScreenNotify_screen_init();
++    logic_init();
++    return ui_ScreenNotify;
++}
++
++void screen_notify_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenNotify
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenNotify_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_notify/screen_notify_logic.h b/components/screen_notify/screen_notify_logic.h
+index 8508a41..5980236 100644
+--- a/components/screen_notify/screen_notify_logic.h
++++ b/components/screen_notify/screen_notify_logic.h
+@@ -1,15 +1,22 @@
+ #pragma once
+ 
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+-// Достраивает вкладку с лентой карточек внутри ui_TabView1 и подписывается
+-// на EVT_BLE_NOTIFY_RX / EVT_BLE_NOTIFY_DEL.
+-// Вызывать один раз из main, после ui_init().
+-void screen_notify_logic_init(void);
++// Запускает приём уведомления в ленту. Вызвать один раз при старте (app_ui_init).
++// Подписки сервиса постоянные и не относятся к жизненному циклу экрана.
++void screen_notify_service_init(void);
+ 
+-void ui_ScreenNotify_full_init(void);
++// Дескриптор для app_nav: { "notify", screen_notify_create, screen_notify_destroy }.
++//
++// create():  строит дерево ui_ScreenNotify, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_notify_create(void);
++void screen_notify_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+diff --git a/components/screen_notify/ui_ScreenNotify.c b/components/screen_notify/ui_ScreenNotify.c
+index e6c0f44..dcb5adf 100644
+--- a/components/screen_notify/ui_ScreenNotify.c
++++ b/components/screen_notify/ui_ScreenNotify.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenNotify = NULL;
+ lv_obj_t * ui_Label8 = NULL;
+@@ -14,11 +15,11 @@ void ui_event_ScreenNotify(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenHome_screen_init);
++nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSD_full_init);
++nav_replace_ex("sd", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ }
+ 
+diff --git a/components/screen_notify/ui_ScreenNotify.h b/components/screen_notify/ui_ScreenNotify.h
+index 76ab991..8fefb26 100644
+--- a/components/screen_notify/ui_ScreenNotify.h
++++ b/components/screen_notify/ui_ScreenNotify.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenNotify
+ extern void ui_ScreenNotify_screen_init(void);
+ extern void ui_ScreenNotify_screen_destroy(void);
+-extern void ui_ScreenNotify_full_init(void);
+ extern void ui_event_ScreenNotify(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenNotify;
+ extern lv_obj_t * ui_Label8;
+diff --git a/components/screen_phone/CMakeLists.txt b/components/screen_phone/CMakeLists.txt
+index f90d1f0..0263f71 100644
+--- a/components/screen_phone/CMakeLists.txt
++++ b/components/screen_phone/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_phone/screen_phone_logic.c b/components/screen_phone/screen_phone_logic.c
+index 271eb34..edae32f 100644
+--- a/components/screen_phone/screen_phone_logic.c
++++ b/components/screen_phone/screen_phone_logic.c
+@@ -16,6 +16,7 @@ static lv_obj_t *bar_progress;
+ static lv_obj_t *lbl_time_elapsed, *lbl_time_total;
+ 
+ static bool s_is_playing = false;
++static app_evt_sub_t s_sub_media;
+ 
+ static void format_mmss(uint32_t seconds, char *buf, size_t buf_sz)
+ {
+@@ -126,6 +127,7 @@ static void build_player_ui(void)
+ static void media_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
+     (void)arg; (void)base; (void)id;
++    if (lbl_title == NULL) return;
+     media_data_t *m = (media_data_t *)event_data;
+ 
+     lv_label_set_text(lbl_title, m->title[0] ? m->title : "No media");
+@@ -147,15 +149,34 @@ static void media_event_handler(void *arg, esp_event_base_t base, int32_t id, vo
+     lv_bar_set_value(bar_progress, progress, LV_ANIM_ON);
+ }
+ 
+-void screen_phone_logic_init(void)
++static void logic_init(void)
+ {
+     build_player_ui();
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_MEDIA_UPDATED, media_event_handler, NULL, NULL);
++    app_evt_subscribe(&s_sub_media, EVT_BLE_MEDIA_UPDATED, media_event_handler, NULL);
+     ESP_LOGI(TAG, "Phone (player) screen logic initialized");
+ }
+ 
+-void ui_ScreenPhone_full_init(void)
++static void logic_deinit(void)
++{
++    app_evt_unsubscribe(&s_sub_media);
++    s_is_playing = false;
++    lbl_title = lbl_artist = NULL;
++    btn_prev = btn_play = btn_next = NULL;
++    lbl_play_icon = NULL;
++    bar_progress = NULL;
++    lbl_time_elapsed = lbl_time_total = NULL;
++}
++
++lv_obj_t *screen_phone_create(void)
+ {
+     ui_ScreenPhone_screen_init();
+-    screen_phone_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenPhone;
++}
++
++void screen_phone_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenPhone
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenPhone_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_phone/screen_phone_logic.h b/components/screen_phone/screen_phone_logic.h
+index b3ab02b..2fcf210 100644
+--- a/components/screen_phone/screen_phone_logic.h
++++ b/components/screen_phone/screen_phone_logic.h
+@@ -1,15 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-// Строит UI плеера поверх ui_ScreenPhone (заголовок трека, исполнитель,
+-// play/pause + prev/next, прогресс-бар) и подписывается на
+-// EVT_BLE_MEDIA_UPDATED (см. docs/ble_protocol_additions.md).
+-void screen_phone_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenPhone_full_init(void);
++// Дескриптор для app_nav: { "phone", screen_phone_create, screen_phone_destroy }.
++//
++// create():  строит дерево ui_ScreenPhone, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_phone_create(void);
++void screen_phone_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_phone/ui_ScreenPhone.c b/components/screen_phone/ui_ScreenPhone.c
+index a1738ae..bd0a1b8 100644
+--- a/components/screen_phone/ui_ScreenPhone.c
++++ b/components/screen_phone/ui_ScreenPhone.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenPhone = NULL;
+ lv_obj_t * ui_Label9 = NULL;
+@@ -14,15 +15,15 @@ void ui_event_ScreenPhone(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenTimeUtils, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenTimeUtils_full_init);
++nav_replace_ex("timeutils", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenHome_screen_init);
++nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSys, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenSys_full_init);
++nav_replace_ex("sys", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
+ }
+ }
+ 
+diff --git a/components/screen_phone/ui_ScreenPhone.h b/components/screen_phone/ui_ScreenPhone.h
+index be69d28..910d66d 100644
+--- a/components/screen_phone/ui_ScreenPhone.h
++++ b/components/screen_phone/ui_ScreenPhone.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenPhone
+ extern void ui_ScreenPhone_screen_init(void);
+ extern void ui_ScreenPhone_screen_destroy(void);
+-extern void ui_ScreenPhone_full_init(void);
+ extern void ui_event_ScreenPhone(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenPhone;
+ extern lv_obj_t * ui_Label9;
+diff --git a/components/screen_sd/CMakeLists.txt b/components/screen_sd/CMakeLists.txt
+index 9c37938..5017f6a 100644
+--- a/components/screen_sd/CMakeLists.txt
++++ b/components/screen_sd/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_sd/screen_sd_logic.c b/components/screen_sd/screen_sd_logic.c
+index e6bc73f..5e2e628 100644
+--- a/components/screen_sd/screen_sd_logic.c
++++ b/components/screen_sd/screen_sd_logic.c
+@@ -66,6 +66,11 @@ typedef struct {
+ static void row_click_cb(lv_event_t *e)
+ {
+     row_user_data_t *ud = (row_user_data_t *)lv_event_get_user_data(e);
++    if (lv_event_get_code(e) == LV_EVENT_DELETE) {   // строки пересоздаются при каждом листинге
++        lv_free(ud);
++        return;
++    }
++    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+     if (strcmp(ud->name, "..") == 0) {
+         go_up();
+     } else if (ud->is_dir) {
+@@ -86,7 +91,7 @@ static void add_row(const char *name, bool is_dir, long size)
+     row_user_data_t *ud = lv_malloc(sizeof(row_user_data_t));
+     snprintf(ud->name, sizeof(ud->name), "%s", name);
+     ud->is_dir = is_dir;
+-    lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, ud);
++    lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_ALL, ud);
+ 
+     lv_obj_t *lbl_icon = lv_label_create(row);
+     lv_label_set_text(lbl_icon, is_dir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_FILE);
+@@ -194,15 +199,31 @@ static void build_ui(void)
+     lv_obj_add_flag(lbl_empty_hint, LV_OBJ_FLAG_HIDDEN);
+ }
+ 
+-void screen_sd_logic_init(void)
++static void logic_init(void)
+ {
+     build_ui();
+     refresh_listing();
+     ESP_LOGI(TAG, "SD explorer screen logic initialized");
+ }
+ 
+-void ui_ScreenSD_full_init(void)
++static void logic_deinit(void)
++{
++    lbl_path = NULL;
++    list_container = NULL;
++    lbl_empty_hint = NULL;
++    snprintf(s_current_path, sizeof(s_current_path), "%s", SD_MOUNT_POINT);   // следующий вход - с корня карты
++}
++
++lv_obj_t *screen_sd_create(void)
+ {
+     ui_ScreenSD_screen_init();
+-    screen_sd_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenSD;
++}
++
++void screen_sd_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSD
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenSD_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_sd/screen_sd_logic.h b/components/screen_sd/screen_sd_logic.h
+index 00ccf4b..018d73e 100644
+--- a/components/screen_sd/screen_sd_logic.h
++++ b/components/screen_sd/screen_sd_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenSD".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenSD уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_sd_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenSD_full_init(void);
++// Дескриптор для app_nav: { "sd", screen_sd_create, screen_sd_destroy }.
++//
++// create():  строит дерево ui_ScreenSD, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_sd_create(void);
++void screen_sd_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_sd/ui_ScreenSD.c b/components/screen_sd/ui_ScreenSD.c
+index 8390a63..bfa42d7 100644
+--- a/components/screen_sd/ui_ScreenSD.c
++++ b/components/screen_sd/ui_ScreenSD.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenSD = NULL;
+ lv_obj_t * ui_Label13 = NULL;
+@@ -14,11 +15,11 @@ void ui_event_ScreenSD(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSettings_full_init);
++nav_replace_ex("settings", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSystem_full_init);
++nav_replace_ex("system", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_sd/ui_ScreenSD.h b/components/screen_sd/ui_ScreenSD.h
+index bf32f7f..192d8a0 100644
+--- a/components/screen_sd/ui_ScreenSD.h
++++ b/components/screen_sd/ui_ScreenSD.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenSD
+ extern void ui_ScreenSD_screen_init(void);
+ extern void ui_ScreenSD_screen_destroy(void);
+-extern void ui_ScreenSD_full_init(void);
+ extern void ui_event_ScreenSD(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenSD;
+ extern lv_obj_t * ui_Label13;
+diff --git a/components/screen_settings/CMakeLists.txt b/components/screen_settings/CMakeLists.txt
+index 99bccb9..3338317 100644
+--- a/components/screen_settings/CMakeLists.txt
++++ b/components/screen_settings/CMakeLists.txt
+@@ -9,6 +9,7 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         svc_battery_monitor
+         svc_ble_sync
+         svc_lighting_monitor
+diff --git a/components/screen_settings/screen_settings_logic.c b/components/screen_settings/screen_settings_logic.c
+index 6900c7d..e8606d8 100644
+--- a/components/screen_settings/screen_settings_logic.c
++++ b/components/screen_settings/screen_settings_logic.c
+@@ -15,6 +15,7 @@ static const char *TAG = "SCREEN_SETTINGS";
+ static lv_obj_t *sw_auto_brightness, *sw_screen_sleep, *sw_battery_monitor, *sw_lighting_monitor, *sw_ble_sync;
+ static lv_obj_t *lbl_status_auto_brightness, *lbl_status_screen_sleep, *lbl_status_battery, *lbl_status_lighting, *lbl_status_ble;
+ static lv_obj_t *scroll_container;
++static lv_timer_t *s_ble_check_timer = NULL;
+ 
+ // =========================================================
+ // CALLBACK-и тумблеров
+@@ -88,7 +89,8 @@ static void ble_check_timer_cb(lv_timer_t *timer)
+ {
+     if (svc_ble_sync_is_advertising()) set_status_label(lbl_status_ble, true, "ADV");
+     else if (svc_ble_sync_is_running()) set_status_label(lbl_status_ble, true, "ON");
+-    lv_timer_del(timer);
++    lv_timer_delete(timer);
++    s_ble_check_timer = NULL;   // одноразовый таймер, удаляет сам себя
+ }
+ 
+ static void delete_keys_btn_cb(lv_event_t *e)
+@@ -211,21 +213,38 @@ static void apply_initial_state(void)
+ 
+     if (svc_ble_sync_is_running()) {
+         lv_obj_add_state(sw_ble_sync, LV_STATE_CHECKED);
+-        lv_timer_create(ble_check_timer_cb, 2000, NULL);
++        s_ble_check_timer = lv_timer_create(ble_check_timer_cb, 2000, NULL);
+     } else {
+         set_status_label(lbl_status_ble, false, "OFF");
+     }
+ }
+ 
+-void screen_settings_logic_init(void)
++static void logic_init(void)
+ {
+     build_ui();
+     apply_initial_state();
+     ESP_LOGI(TAG, "Settings screen logic initialized (перенесено со старой платы)");
+ }
+ 
+-void ui_ScreenSettings_full_init(void)
++static void logic_deinit(void)
++{
++    if (s_ble_check_timer) { lv_timer_delete(s_ble_check_timer); s_ble_check_timer = NULL; }
++    sw_auto_brightness = sw_screen_sleep = sw_battery_monitor = sw_lighting_monitor = sw_ble_sync = NULL;
++    lbl_status_auto_brightness = lbl_status_screen_sleep = lbl_status_battery = NULL;
++    lbl_status_lighting = lbl_status_ble = NULL;
++    scroll_container = NULL;
++}
++
++lv_obj_t *screen_settings_create(void)
+ {
+     ui_ScreenSettings_screen_init();
+-    screen_settings_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenSettings;
++}
++
++void screen_settings_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSettings
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenSettings_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_settings/screen_settings_logic.h b/components/screen_settings/screen_settings_logic.h
+index 89fc41c..ff10251 100644
+--- a/components/screen_settings/screen_settings_logic.h
++++ b/components/screen_settings/screen_settings_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenSettings".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenSettings уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_settings_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenSettings_full_init(void);
++// Дескриптор для app_nav: { "settings", screen_settings_create, screen_settings_destroy }.
++//
++// create():  строит дерево ui_ScreenSettings, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_settings_create(void);
++void screen_settings_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_settings/ui_ScreenSettings.c b/components/screen_settings/ui_ScreenSettings.c
+index f627595..c5ef3d3 100644
+--- a/components/screen_settings/ui_ScreenSettings.c
++++ b/components/screen_settings/ui_ScreenSettings.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenSettings = NULL;
+ lv_obj_t * ui_Label14 = NULL;
+@@ -14,19 +15,19 @@ void ui_event_ScreenSettings(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSystem, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSystem_full_init);
++nav_replace_ex("system", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSD_full_init);
++nav_replace_ex("sd", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenNotify, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenNotify_full_init);
++nav_replace_ex("notify", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenWeather_full_init);
++nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
+ }
+ }
+ 
+diff --git a/components/screen_settings/ui_ScreenSettings.h b/components/screen_settings/ui_ScreenSettings.h
+index 72366db..2f23230 100644
+--- a/components/screen_settings/ui_ScreenSettings.h
++++ b/components/screen_settings/ui_ScreenSettings.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenSettings
+ extern void ui_ScreenSettings_screen_init(void);
+ extern void ui_ScreenSettings_screen_destroy(void);
+-extern void ui_ScreenSettings_full_init(void);
+ extern void ui_event_ScreenSettings(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenSettings;
+ extern lv_obj_t * ui_Label14;
+diff --git a/components/screen_sys/CMakeLists.txt b/components/screen_sys/CMakeLists.txt
+index 91999f5..8398d4e 100644
+--- a/components/screen_sys/CMakeLists.txt
++++ b/components/screen_sys/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_sys/screen_sys_logic.c b/components/screen_sys/screen_sys_logic.c
+index 77ab282..5ec655b 100644
+--- a/components/screen_sys/screen_sys_logic.c
++++ b/components/screen_sys/screen_sys_logic.c
+@@ -11,6 +11,7 @@ static lv_obj_t *lbl_signal;
+ static lv_obj_t *lbl_battery;
+ static lv_obj_t *lbl_carrier;
+ static lv_obj_t *lbl_connection_state;
++static app_evt_sub_t s_sub_status;
+ 
+ static void build_ui(void)
+ {
+@@ -58,6 +59,7 @@ static void build_ui(void)
+ static void phone_status_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data)
+ {
+     (void)arg; (void)base; (void)id;
++    if (lbl_connection_state == NULL) return;
+     phone_status_data_t *ps = (phone_status_data_t *)event_data;
+ 
+     lv_label_set_text(lbl_connection_state, LV_SYMBOL_OK " Connected");
+@@ -81,15 +83,29 @@ static void phone_status_handler(void *arg, esp_event_base_t base, int32_t id, v
+     lv_label_set_text(lbl_carrier, buf);
+ }
+ 
+-void screen_sys_logic_init(void)
++static void logic_init(void)
+ {
+     build_ui();
+-    esp_event_handler_instance_register(APP_EVENTS, EVT_BLE_PHONE_STATUS_UPDATED, phone_status_handler, NULL, NULL);
++    app_evt_subscribe(&s_sub_status, EVT_BLE_PHONE_STATUS_UPDATED, phone_status_handler, NULL);
+     ESP_LOGI(TAG, "Sys (phone status) screen logic initialized");
+ }
+ 
+-void ui_ScreenSys_full_init(void)
++static void logic_deinit(void)
++{
++    app_evt_unsubscribe(&s_sub_status);
++    lbl_signal = lbl_battery = lbl_carrier = lbl_connection_state = NULL;
++}
++
++lv_obj_t *screen_sys_create(void)
+ {
+     ui_ScreenSys_screen_init();
+-    screen_sys_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenSys;
++}
++
++void screen_sys_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSys
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenSys_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_sys/screen_sys_logic.h b/components/screen_sys/screen_sys_logic.h
+index 43f5b02..885fcaf 100644
+--- a/components/screen_sys/screen_sys_logic.h
++++ b/components/screen_sys/screen_sys_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenSys".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenSys уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_sys_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenSys_full_init(void);
++// Дескриптор для app_nav: { "sys", screen_sys_create, screen_sys_destroy }.
++//
++// create():  строит дерево ui_ScreenSys, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_sys_create(void);
++void screen_sys_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_sys/ui_ScreenSys.c b/components/screen_sys/ui_ScreenSys.c
+index 844a115..bfa5915 100644
+--- a/components/screen_sys/ui_ScreenSys.c
++++ b/components/screen_sys/ui_ScreenSys.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenSys = NULL;
+ lv_obj_t * ui_Label17 = NULL;
+@@ -14,11 +15,11 @@ void ui_event_ScreenSys(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenPhone_full_init);
++nav_replace_ex("phone", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenIR, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenIR_full_init);
++nav_replace_ex("ir", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_sys/ui_ScreenSys.h b/components/screen_sys/ui_ScreenSys.h
+index 1d4412f..9758dcd 100644
+--- a/components/screen_sys/ui_ScreenSys.h
++++ b/components/screen_sys/ui_ScreenSys.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenSys
+ extern void ui_ScreenSys_screen_init(void);
+ extern void ui_ScreenSys_screen_destroy(void);
+-extern void ui_ScreenSys_full_init(void);
+ extern void ui_event_ScreenSys(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenSys;
+ extern lv_obj_t * ui_Label17;
+diff --git a/components/screen_system/CMakeLists.txt b/components/screen_system/CMakeLists.txt
+index a722234..a32aa14 100644
+--- a/components/screen_system/CMakeLists.txt
++++ b/components/screen_system/CMakeLists.txt
+@@ -9,6 +9,7 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         spi_flash
+         esp_timer
+ )
+diff --git a/components/screen_system/screen_system_logic.c b/components/screen_system/screen_system_logic.c
+index 9796630..fd98493 100644
+--- a/components/screen_system/screen_system_logic.c
++++ b/components/screen_system/screen_system_logic.c
+@@ -11,7 +11,7 @@
+ static const char *TAG = "SCREEN_SYSTEM";
+ 
+ static lv_obj_t *lbl_chip, *lbl_flash, *lbl_heap, *lbl_idf, *lbl_uptime;
+-static lv_timer_t *refresh_timer;
++static lv_timer_t *refresh_timer = NULL;
+ 
+ static void format_uptime(int64_t us, char *buf, size_t buf_sz)
+ {
+@@ -107,7 +107,7 @@ static void refresh_static(void)
+     lv_label_set_text(lbl_idf, esp_get_idf_version());
+ }
+ 
+-void screen_system_logic_init(void)
++static void logic_init(void)
+ {
+     build_ui();
+     refresh_static();
+@@ -116,8 +116,22 @@ void screen_system_logic_init(void)
+     ESP_LOGI(TAG, "System screen logic initialized");
+ }
+ 
+-void ui_ScreenSystem_full_init(void)
++static void logic_deinit(void)
++{
++    if (refresh_timer) { lv_timer_delete(refresh_timer); refresh_timer = NULL; }
++    lbl_chip = lbl_flash = lbl_heap = lbl_idf = lbl_uptime = NULL;
++}
++
++lv_obj_t *screen_system_create(void)
+ {
+     ui_ScreenSystem_screen_init();
+-    screen_system_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenSystem;
++}
++
++void screen_system_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSystem
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenSystem_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_system/screen_system_logic.h b/components/screen_system/screen_system_logic.h
+index 1553a0a..5a7d6d6 100644
+--- a/components/screen_system/screen_system_logic.h
++++ b/components/screen_system/screen_system_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenSystem".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenSystem уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_system_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenSystem_full_init(void);
++// Дескриптор для app_nav: { "system", screen_system_create, screen_system_destroy }.
++//
++// create():  строит дерево ui_ScreenSystem, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_system_create(void);
++void screen_system_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_system/ui_ScreenSystem.c b/components/screen_system/ui_ScreenSystem.c
+index 928e087..a07cae6 100644
+--- a/components/screen_system/ui_ScreenSystem.c
++++ b/components/screen_system/ui_ScreenSystem.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenSystem = NULL;
+ lv_obj_t * ui_Label15 = NULL;
+@@ -14,11 +15,11 @@ void ui_event_ScreenSystem(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSD, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenSD_full_init);
++nav_replace_ex("sd", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenSettings_full_init);
++nav_replace_ex("settings", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_system/ui_ScreenSystem.h b/components/screen_system/ui_ScreenSystem.h
+index 85682ff..1c5ff72 100644
+--- a/components/screen_system/ui_ScreenSystem.h
++++ b/components/screen_system/ui_ScreenSystem.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenSystem
+ extern void ui_ScreenSystem_screen_init(void);
+ extern void ui_ScreenSystem_screen_destroy(void);
+-extern void ui_ScreenSystem_full_init(void);
+ extern void ui_event_ScreenSystem(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenSystem;
+ extern lv_obj_t * ui_Label15;
+diff --git a/components/screen_timeutils/CMakeLists.txt b/components/screen_timeutils/CMakeLists.txt
+index a59607d..7b3ad9f 100644
+--- a/components/screen_timeutils/CMakeLists.txt
++++ b/components/screen_timeutils/CMakeLists.txt
+@@ -9,6 +9,7 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+         esp_timer
+         svc_vibro
+ )
+diff --git a/components/screen_timeutils/screen_timeutils_logic.c b/components/screen_timeutils/screen_timeutils_logic.c
+index 218c674..b363a4d 100644
+--- a/components/screen_timeutils/screen_timeutils_logic.c
++++ b/components/screen_timeutils/screen_timeutils_logic.c
+@@ -349,15 +349,44 @@ static void build_stopwatch_tab(void)
+     sw_set_buttons_idle();
+ }
+ 
+-void screen_timeutils_logic_init(void)
++static void logic_init(void)
+ {
+     build_timer_tab();
+     build_stopwatch_tab();
+     ESP_LOGI(TAG, "TimeUtils screen logic initialized");
+ }
+ 
+-void ui_ScreenTimeUtils_full_init(void)
++static void logic_deinit(void)
++{
++    if (timer_tick) { lv_timer_delete(timer_tick); timer_tick = NULL; }
++    if (sw_tick)    { lv_timer_delete(sw_tick);    sw_tick = NULL; }
++
++    // Состояние живёт ровно столько же, сколько экран: уходим - таймер и
++    // секундомер сбрасываются (иначе виджеты после пересоздания не совпали бы с ним).
++    timer_remaining_sec = 0;
++    sw_state = SW_IDLE;
++    sw_start_us = 0;
++    sw_accumulated_us = 0;
++    sw_lap_count = 0;
++
++    roller_h = roller_m = roller_s = NULL;
++    timer_setup_row = timer_countdown_label = timer_btn_row = NULL;
++    timer_start_btn = timer_cancel_btn = NULL;
++    sw_lbl_hhmm = sw_lbl_ssms = NULL;
++    sw_btn_left = sw_btn_right = NULL;
++    sw_laps_list = NULL;
++}
++
++lv_obj_t *screen_timeutils_create(void)
+ {
+     ui_ScreenTimeUtils_screen_init();
+-    screen_timeutils_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenTimeUtils;
++}
++
++void screen_timeutils_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenTimeUtils
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenTimeUtils_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_timeutils/screen_timeutils_logic.h b/components/screen_timeutils/screen_timeutils_logic.h
+index e7f9f11..f6ce653 100644
+--- a/components/screen_timeutils/screen_timeutils_logic.h
++++ b/components/screen_timeutils/screen_timeutils_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenTimeUtils".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenTimeUtils уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_timeutils_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenTimeUtils_full_init(void);
++// Дескриптор для app_nav: { "timeutils", screen_timeutils_create, screen_timeutils_destroy }.
++//
++// create():  строит дерево ui_ScreenTimeUtils, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_timeutils_create(void);
++void screen_timeutils_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_timeutils/ui_ScreenTimeUtils.c b/components/screen_timeutils/ui_ScreenTimeUtils.c
+index 19ee695..54fcc94 100644
+--- a/components/screen_timeutils/ui_ScreenTimeUtils.c
++++ b/components/screen_timeutils/ui_ScreenTimeUtils.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenTimeUtils = NULL;
+ lv_obj_t * ui_TabView2 = NULL;
+@@ -16,11 +17,11 @@ void ui_event_ScreenTimeUtils(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenPhone, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenPhone_full_init);
++nav_replace_ex("phone", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenCalc, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenCalc_full_init);
++nav_replace_ex("calc", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_timeutils/ui_ScreenTimeUtils.h b/components/screen_timeutils/ui_ScreenTimeUtils.h
+index 6e51373..e790836 100644
+--- a/components/screen_timeutils/ui_ScreenTimeUtils.h
++++ b/components/screen_timeutils/ui_ScreenTimeUtils.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenTimeUtils
+ extern void ui_ScreenTimeUtils_screen_init(void);
+ extern void ui_ScreenTimeUtils_screen_destroy(void);
+-extern void ui_ScreenTimeUtils_full_init(void);
+ extern void ui_event_ScreenTimeUtils(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenTimeUtils;
+ extern lv_obj_t * ui_TabView2;
+diff --git a/components/screen_weather/CMakeLists.txt b/components/screen_weather/CMakeLists.txt
+index 21acf59..aa4499d 100644
+--- a/components/screen_weather/CMakeLists.txt
++++ b/components/screen_weather/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_weather/screen_weather_logic.c b/components/screen_weather/screen_weather_logic.c
+index 876c84f..610bf8a 100644
+--- a/components/screen_weather/screen_weather_logic.c
++++ b/components/screen_weather/screen_weather_logic.c
+@@ -4,15 +4,28 @@
+ 
+ static const char *TAG = "SCREEN_WEATHER";
+ 
+-void screen_weather_logic_init(void)
++static void logic_init(void)
+ {
+     // TODO: наполнить логикой экрана ScreenWeather
+     // Пример: esp_event_handler_instance_register(APP_EVENTS, EVT_..., handler, NULL, NULL);
+     ESP_LOGI(TAG, "ScreenWeather logic stub initialized");
+ }
+ 
+-void ui_ScreenWeather_full_init(void)
++static void logic_deinit(void)
++{
++    // ничего своего: ни подписок, ни таймеров; ui_ScreenWeather_screen_destroy() обнулит ui_*
++}
++
++lv_obj_t *screen_weather_create(void)
+ {
+     ui_ScreenWeather_screen_init();
+-    screen_weather_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenWeather;
++}
++
++void screen_weather_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenWeather
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenWeather_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_weather/screen_weather_logic.h b/components/screen_weather/screen_weather_logic.h
+index 9c2f11e..e4ee2e8 100644
+--- a/components/screen_weather/screen_weather_logic.h
++++ b/components/screen_weather/screen_weather_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenWeather".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenWeather уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_weather_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenWeather_full_init(void);
++// Дескриптор для app_nav: { "weather", screen_weather_create, screen_weather_destroy }.
++//
++// create():  строит дерево ui_ScreenWeather, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_weather_create(void);
++void screen_weather_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_weather/ui_ScreenWeather.c b/components/screen_weather/ui_ScreenWeather.c
+index 9e07447..bb5f8a6 100644
+--- a/components/screen_weather/ui_ScreenWeather.c
++++ b/components/screen_weather/ui_ScreenWeather.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenWeather = NULL;
+ lv_obj_t * ui_Label11 = NULL;
+@@ -14,19 +15,19 @@ void ui_event_ScreenWeather(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenWeatherDetails, LV_SCR_LOAD_ANIM_MOVE_LEFT, 500, 0, &ui_ScreenWeatherDetails_full_init);
++nav_replace_ex("weatherdetails", LV_SCR_LOAD_ANIM_MOVE_LEFT, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenSettings, LV_SCR_LOAD_ANIM_MOVE_TOP, 500, 0, &ui_ScreenSettings_full_init);
++nav_replace_ex("settings", LV_SCR_LOAD_ANIM_MOVE_TOP, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenHome, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_ScreenHome_screen_init);
++nav_replace_ex("home", LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500);
+ }
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenNews, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenNews_full_init);
++nav_replace_ex("news", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_weather/ui_ScreenWeather.h b/components/screen_weather/ui_ScreenWeather.h
+index 38fc208..1609238 100644
+--- a/components/screen_weather/ui_ScreenWeather.h
++++ b/components/screen_weather/ui_ScreenWeather.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenWeather
+ extern void ui_ScreenWeather_screen_init(void);
+ extern void ui_ScreenWeather_screen_destroy(void);
+-extern void ui_ScreenWeather_full_init(void);
+ extern void ui_event_ScreenWeather(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenWeather;
+ extern lv_obj_t * ui_Label11;
+diff --git a/components/screen_weatherdetails/CMakeLists.txt b/components/screen_weatherdetails/CMakeLists.txt
+index e06662e..6dfcb44 100644
+--- a/components/screen_weatherdetails/CMakeLists.txt
++++ b/components/screen_weatherdetails/CMakeLists.txt
+@@ -9,4 +9,5 @@ idf_component_register(
+         app_core
+         ui_resources
+         ui
++        app_nav
+ )
+diff --git a/components/screen_weatherdetails/screen_weatherdetails_logic.c b/components/screen_weatherdetails/screen_weatherdetails_logic.c
+index e9d9365..e626aa5 100644
+--- a/components/screen_weatherdetails/screen_weatherdetails_logic.c
++++ b/components/screen_weatherdetails/screen_weatherdetails_logic.c
+@@ -4,15 +4,28 @@
+ 
+ static const char *TAG = "SCREEN_WEATHERDETAILS";
+ 
+-void screen_weatherdetails_logic_init(void)
++static void logic_init(void)
+ {
+     // TODO: наполнить логикой экрана ScreenWeatherDetails
+     // Пример: esp_event_handler_instance_register(APP_EVENTS, EVT_..., handler, NULL, NULL);
+     ESP_LOGI(TAG, "ScreenWeatherDetails logic stub initialized");
+ }
+ 
+-void ui_ScreenWeatherDetails_full_init(void)
++static void logic_deinit(void)
++{
++    // ничего своего: ни подписок, ни таймеров; ui_ScreenWeatherDetails_screen_destroy() обнулит ui_*
++}
++
++lv_obj_t *screen_weatherdetails_create(void)
+ {
+     ui_ScreenWeatherDetails_screen_init();
+-    screen_weatherdetails_logic_init();
+-}
+\ No newline at end of file
++    logic_init();
++    return ui_ScreenWeatherDetails;
++}
++
++void screen_weatherdetails_destroy(lv_obj_t *scr)
++{
++    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenWeatherDetails
++    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
++    ui_ScreenWeatherDetails_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
++}
+diff --git a/components/screen_weatherdetails/screen_weatherdetails_logic.h b/components/screen_weatherdetails/screen_weatherdetails_logic.h
+index 9f7d62a..c207706 100644
+--- a/components/screen_weatherdetails/screen_weatherdetails_logic.h
++++ b/components/screen_weatherdetails/screen_weatherdetails_logic.h
+@@ -1,17 +1,19 @@
+ #pragma once
++
++#include "lvgl.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-/**
+-* Инициализация логики экрана "ScreenWeatherDetails".
+-* Вызывается один раз из main после ui_init() (когда ui_ScreenWeatherDetails уже создан).
+-* Здесь: регистрация esp_event хендлеров, lv_timer, привязка к сервисам app_core.
+-*/
+-void screen_weatherdetails_logic_init(void);
+ 
+-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
+-void ui_ScreenWeatherDetails_full_init(void);
++// Дескриптор для app_nav: { "weatherdetails", screen_weatherdetails_create, screen_weatherdetails_destroy }.
++//
++// create():  строит дерево ui_ScreenWeatherDetails, достраивает логику, подписывается на события.
++// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
++//            виджеты и удаляет сам экран. Вызывается только навигатором.
++lv_obj_t *screen_weatherdetails_create(void);
++void screen_weatherdetails_destroy(lv_obj_t *scr);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/components/screen_weatherdetails/ui_ScreenWeatherDetails.c b/components/screen_weatherdetails/ui_ScreenWeatherDetails.c
+index ace6e52..09776cd 100644
+--- a/components/screen_weatherdetails/ui_ScreenWeatherDetails.c
++++ b/components/screen_weatherdetails/ui_ScreenWeatherDetails.c
+@@ -4,6 +4,7 @@
+ // Project name: DharmaXĶ
+ 
+ #include "ui.h"
++#include "app_nav.h"
+ 
+ lv_obj_t * ui_ScreenWeatherDetails = NULL;
+ lv_obj_t * ui_Label12 = NULL;
+@@ -14,7 +15,7 @@ void ui_event_ScreenWeatherDetails(lv_event_t * e)
+ lv_event_code_t event_code = lv_event_get_code(e);
+ if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+ lv_indev_wait_release(lv_indev_active());
+-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenWeather_full_init);
++nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
+ }
+ }
+ 
+diff --git a/components/screen_weatherdetails/ui_ScreenWeatherDetails.h b/components/screen_weatherdetails/ui_ScreenWeatherDetails.h
+index 2d10272..11df3c8 100644
+--- a/components/screen_weatherdetails/ui_ScreenWeatherDetails.h
++++ b/components/screen_weatherdetails/ui_ScreenWeatherDetails.h
+@@ -13,7 +13,6 @@ extern "C" {
+ // SCREEN: ui_ScreenWeatherDetails
+ extern void ui_ScreenWeatherDetails_screen_init(void);
+ extern void ui_ScreenWeatherDetails_screen_destroy(void);
+-extern void ui_ScreenWeatherDetails_full_init(void);
+ extern void ui_event_ScreenWeatherDetails(lv_event_t * e);
+ extern lv_obj_t * ui_ScreenWeatherDetails;
+ extern lv_obj_t * ui_Label12;
+diff --git a/components/ui/ui.c b/components/ui/ui.c
+index f4aed43..e01c4ce 100644
+--- a/components/ui/ui.c
++++ b/components/ui/ui.c
+@@ -8,9 +8,6 @@
+ 
+ ///////////////////// VARIABLES ////////////////////
+ 
+-// EVENTS
+-lv_obj_t * ui____initial_actions0;
+-
+ // IMAGES AND IMAGE SETS
+ 
+ ///////////////////// TEST LVGL SETTINGS ////////////////////
+@@ -22,51 +19,15 @@ lv_obj_t * ui____initial_actions0;
+ 
+ ///////////////////// FUNCTIONS ////////////////////
+ 
+-///////////////////// SCREENS ////////////////////
++///////////////////// INIT ////////////////////
+ 
++// Экраны больше не строятся здесь: их создаёт и уничтожает app_nav (см.
++// app_ui.c - таблица дескрипторов и nav_push("home")). Остаётся только то,
++// что относится ко всему дисплею, - тема.
+ void ui_init(void)
+ {
+     lv_disp_t * dispp = lv_display_get_default();
+     lv_theme_t * theme = lv_theme_default_init(dispp, lv_color_hex(UI_COLOR_ACCENT), lv_color_hex(UI_COLOR_ACCENT_DIM),
+                                                true, LV_FONT_DEFAULT);
+     lv_disp_set_theme(dispp, theme);
+-    ui_ScreenHome_screen_init();
+-    // ui_ScreenNotify_screen_init();
+-    // ui_ScreenPhone_screen_init();
+-    // ui_ScreenTimeUtils_screen_init();
+-    // ui_ScreenCalc_screen_init();
+-    // ui_ScreenWeather_screen_init();
+-    // ui_ScreenSD_screen_init();
+-    // ui_ScreenCalendar_screen_init();
+-    // ui_ScreenSettings_screen_init();
+-    // ui_ScreenSystem_screen_init();
+-    // ui_ScreenWeatherDetails_screen_init();
+-    ui_ScreenNews_screen_init();
+-    // ui_ScreenEvents_screen_init();
+-    // ui_ScreenSys_screen_init();
+-    // ui_ScreenIR_screen_init();
+-    // ui_ScreenAOD_screen_init();
+-    ui____initial_actions0 = lv_obj_create(NULL);
+-    lv_disp_load_scr(ui_ScreenHome);
+ }
+-
+-void ui_destroy(void)
+-{
+-    ui_ScreenHome_screen_destroy();
+-    ui_ScreenNotify_screen_destroy();
+-    ui_ScreenPhone_screen_destroy();
+-    ui_ScreenTimeUtils_screen_destroy();
+-    ui_ScreenCalc_screen_destroy();
+-    ui_ScreenWeather_screen_destroy();
+-    ui_ScreenSD_screen_destroy();
+-    ui_ScreenCalendar_screen_destroy();
+-    ui_ScreenSettings_screen_destroy();
+-    ui_ScreenSystem_screen_destroy();
+-    ui_ScreenWeatherDetails_screen_destroy();
+-    ui_ScreenNews_screen_destroy();
+-    ui_ScreenEvents_screen_destroy();
+-    ui_ScreenSys_screen_destroy();
+-    ui_ScreenIR_screen_destroy();
+-    ui_ScreenAOD_screen_destroy();
+-}
+-
+diff --git a/components/ui/ui.h b/components/ui/ui.h
+index 6f1ac14..5feff07 100644
+--- a/components/ui/ui.h
++++ b/components/ui/ui.h
+@@ -46,12 +46,8 @@ extern "C" {
+ 
+ ///////////////////// VARIABLES ////////////////////
+ 
+-// EVENTS
+-extern lv_obj_t * ui____initial_actions0;
+-
+-// UI INIT
++// UI INIT: только тема дисплея. Экраны создаёт app_nav.
+ void ui_init(void);
+-void ui_destroy(void);
+ 
+ #ifdef __cplusplus
+ } /*extern "C"*/
+diff --git a/components/ui_pairing_popup/ui_pairing_popup.c b/components/ui_pairing_popup/ui_pairing_popup.c
+index 6f0cfe5..d42d8f2 100644
+--- a/components/ui_pairing_popup/ui_pairing_popup.c
++++ b/components/ui_pairing_popup/ui_pairing_popup.c
+@@ -19,8 +19,10 @@ void show_pairing_popup(const char *code)
+     s_popup_open = true;
+     if (s_popup_bg != NULL) return; // уже открыт
+ 
+-    // Затемняющий фон поверх активного экрана
+-    s_popup_bg = lv_obj_create(lv_screen_active());
++    // Затемняющий фон поверх ЛЮБОГО экрана. Родитель - lv_layer_top(), а не
++    // lv_screen_active(): экран под попапом теперь могут уничтожить (app_nav),
++    // и s_popup_bg повис бы на удалённом объекте.
++    s_popup_bg = lv_obj_create(lv_layer_top());
+     lv_obj_remove_style_all(s_popup_bg);
+     lv_obj_set_size(s_popup_bg, LV_PCT(100), LV_PCT(100));
+     lv_obj_set_style_bg_color(s_popup_bg, lv_color_hex(0x000000), 0);
+diff --git a/components/ui_widgets/card_feed.c b/components/ui_widgets/card_feed.c
+index c3ea616..447cbd7 100644
+--- a/components/ui_widgets/card_feed.c
++++ b/components/ui_widgets/card_feed.c
+@@ -141,6 +141,16 @@ static void card_released_cb(lv_event_t *e)
+ // ==========================================
+ // СОЗДАНИЕ ЛЕНТЫ / КАРТОЧЕК
+ // ==========================================
++// Скрытый "экран-ангар": на него переезжает лента, пока её экран уничтожен.
++// Он не загружается на дисплей, поэтому ничего не рисуется.
++static lv_obj_t *s_holder = NULL;
++
++static lv_obj_t *holder(void)
++{
++    if (s_holder == NULL) s_holder = lv_obj_create(NULL);
++    return s_holder;
++}
++
+ card_feed_t card_feed_create(lv_obj_t *parent, uint32_t auto_delete_ms)
+ {
+     card_feed_t feed = lv_malloc(sizeof(struct card_feed_s));
+@@ -276,6 +286,34 @@ void card_feed_clear(card_feed_t feed)
+     }
+ }
+ 
++card_feed_t card_feed_create_detached(uint32_t auto_delete_ms)
++{
++    return card_feed_create(holder(), auto_delete_ms);
++}
++
++void card_feed_attach(card_feed_t feed, lv_obj_t *parent)
++{
++    if (!feed || !parent) return;
++    lv_obj_set_parent(feed->container, parent);
++}
++
++void card_feed_detach(card_feed_t feed)
++{
++    if (!feed) return;
++    // Бросаем недосвайпнутую карточку: после переноса жеста уже не будет
++    feed->active_swipe_card = NULL;
++    lv_obj_add_flag(feed->container, LV_OBJ_FLAG_SCROLLABLE);
++    lv_obj_set_parent(feed->container, holder());
++}
++
++void card_feed_destroy(card_feed_t feed)
++{
++    if (!feed) return;
++    card_feed_clear(feed);              // удаляет карточки вместе с их auto-delete таймерами
++    lv_obj_delete(feed->container);
++    lv_free(feed);
++}
++
+ lv_obj_t *card_feed_get_container(card_feed_t feed)
+ {
+     return feed ? feed->container : NULL;
+diff --git a/components/ui_widgets/card_feed.h b/components/ui_widgets/card_feed.h
+index 4a7cd29..18064d7 100644
+--- a/components/ui_widgets/card_feed.h
++++ b/components/ui_widgets/card_feed.h
+@@ -11,6 +11,15 @@ extern "C" {
+ 
+ typedef struct card_feed_s *card_feed_t;
+ 
++// --- Жизненный цикл ленты, переживающей экран --------------------------------
++// Экран с лентой (notify / events / news) уничтожается навигатором, а карточки
++// нельзя терять: сервис ленты создаёт её "в стороне" и принимает события, пока
++// экрана нет; экран при create() подключает ленту, при destroy() отключает.
++card_feed_t card_feed_create_detached(uint32_t auto_delete_ms);  // лента во внутреннем скрытом контейнере
++void card_feed_attach(card_feed_t feed, lv_obj_t *parent);       // перенести ленту на экран
++void card_feed_detach(card_feed_t feed);                         // убрать с экрана обратно в скрытый контейнер
++void card_feed_destroy(card_feed_t feed);                        // полностью удалить ленту, карточки и их таймеры
++
+ // Создаёт вертикальный скроллируемый список карточек внутри parent
+ // (например, вкладки TabView или самого экрана).
+ // auto_delete_ms - через сколько мс карточка исчезнет сама (0 = никогда).

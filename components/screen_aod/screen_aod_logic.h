@@ -1,18 +1,28 @@
 #pragma once
 
+#include "lvgl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Регистрирует обработчики EVT_MOTION_WRIST_SLEEP / EVT_MOTION_WRIST_RAISE
-// и подключает автообновление стрелок AOD (раз в секунду, только пока
-// экран AOD активен - в остальное время таймер остановлен и не тратит CPU).
+// Дескриптор для app_nav: { "aod", screen_aod_create, screen_aod_destroy }.
+// create() строит часы и запускает секундный таймер, destroy() его удаляет.
+lv_obj_t *screen_aod_create(void);
+void screen_aod_destroy(lv_obj_t *scr);
+
+// Регистрирует постоянные триггеры EVT_MOTION_WRIST_SLEEP / EVT_MOTION_WRIST_RAISE.
+// Они не принадлежат экрану и живут весь uptime; сами экран не создают, а
+// просто зовут screen_aod_enter()/screen_aod_exit().
 void screen_aod_logic_init(void);
 
-// Можно вызывать и напрямую (например, из svc_screen_sleep по таймеру
-// бездействия, если он у вас не завязан на события wrist raise/sleep).
-void screen_aod_enter(void);   // войти в режим AOD (запомнит текущий экран)
-void screen_aod_exit(void);    // выйти из AOD, вернуться на запомненный экран
+// AOD - оверлей: enter = nav_push("aod"), exit = nav_pop() (вернёт тот экран,
+// с которого уходили). Можно вызывать из svc_screen_sleep. Идемпотентны.
+void screen_aod_enter(void);
+void screen_aod_exit(void);
+
+// Выйти из AOD сразу на home (касание по экрану AOD).
+void screen_aod_exit_to_home(void);
 
 #ifdef __cplusplus
 } /*extern "C"*/

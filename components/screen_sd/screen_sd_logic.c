@@ -66,6 +66,11 @@ typedef struct {
 static void row_click_cb(lv_event_t *e)
 {
     row_user_data_t *ud = (row_user_data_t *)lv_event_get_user_data(e);
+    if (lv_event_get_code(e) == LV_EVENT_DELETE) {   // строки пересоздаются при каждом листинге
+        lv_free(ud);
+        return;
+    }
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     if (strcmp(ud->name, "..") == 0) {
         go_up();
     } else if (ud->is_dir) {
@@ -86,7 +91,7 @@ static void add_row(const char *name, bool is_dir, long size)
     row_user_data_t *ud = lv_malloc(sizeof(row_user_data_t));
     snprintf(ud->name, sizeof(ud->name), "%s", name);
     ud->is_dir = is_dir;
-    lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, ud);
+    lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_ALL, ud);
 
     lv_obj_t *lbl_icon = lv_label_create(row);
     lv_label_set_text(lbl_icon, is_dir ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_FILE);
@@ -194,15 +199,31 @@ static void build_ui(void)
     lv_obj_add_flag(lbl_empty_hint, LV_OBJ_FLAG_HIDDEN);
 }
 
-void screen_sd_logic_init(void)
+static void logic_init(void)
 {
     build_ui();
     refresh_listing();
     ESP_LOGI(TAG, "SD explorer screen logic initialized");
 }
 
-void ui_ScreenSD_full_init(void)
+static void logic_deinit(void)
+{
+    lbl_path = NULL;
+    list_container = NULL;
+    lbl_empty_hint = NULL;
+    snprintf(s_current_path, sizeof(s_current_path), "%s", SD_MOUNT_POINT);   // следующий вход - с корня карты
+}
+
+lv_obj_t *screen_sd_create(void)
 {
     ui_ScreenSD_screen_init();
-    screen_sd_logic_init();
+    logic_init();
+    return ui_ScreenSD;
+}
+
+void screen_sd_destroy(lv_obj_t *scr)
+{
+    (void)scr;                        // экран - синглтон, его указатель лежит в ui_ScreenSD
+    logic_deinit();                   // 1) подписки  2) таймеры  3) указатели на виджеты
+    ui_ScreenSD_screen_destroy();     // lv_obj_del + обнуление глобальных ui_*
 }

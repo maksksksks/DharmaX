@@ -4,6 +4,7 @@
 // Project name: DharmaXĶ
 
 #include "ui.h"
+#include "app_nav.h"
 
 lv_obj_t * ui_ScreenWeatherDetails = NULL;
 lv_obj_t * ui_Label12 = NULL;
@@ -14,7 +15,7 @@ void ui_event_ScreenWeatherDetails(lv_event_t * e)
 lv_event_code_t event_code = lv_event_get_code(e);
 if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
 lv_indev_wait_release(lv_indev_active());
-_ui_screen_change(&ui_ScreenWeather, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500, 0, &ui_ScreenWeather_full_init);
+nav_replace_ex("weather", LV_SCR_LOAD_ANIM_MOVE_RIGHT, 500);
 }
 }
 

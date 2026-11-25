@@ -1,14 +1,18 @@
 #pragma once
+
+#include "lvgl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-// Строит UI плеера поверх ui_ScreenPhone (заголовок трека, исполнитель,
-// play/pause + prev/next, прогресс-бар) и подписывается на
-// EVT_BLE_MEDIA_UPDATED (см. docs/ble_protocol_additions.md).
-void screen_phone_logic_init(void);
 
-// Обёртка для ленивой инициализации: создаёт экран + запускает логику.
-void ui_ScreenPhone_full_init(void);
+// Дескриптор для app_nav: { "phone", screen_phone_create, screen_phone_destroy }.
+//
+// create():  строит дерево ui_ScreenPhone, достраивает логику, подписывается на события.
+// destroy(): снимает ВСЕ подписки и lv_timer экрана, обнуляет указатели на его
+//            виджеты и удаляет сам экран. Вызывается только навигатором.
+lv_obj_t *screen_phone_create(void);
+void screen_phone_destroy(lv_obj_t *scr);
 
 #ifdef __cplusplus
 } /*extern "C"*/
