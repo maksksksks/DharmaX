@@ -28,6 +28,19 @@ typedef enum {
     EVT_BLE_NEWS_RX,      // новость -> notify_data
     EVT_BLE_MEDIA_UPDATED,      // обновление состояния плеера -> media_data_t
     EVT_BLE_PHONE_STATUS_UPDATED, // статус телефона -> phone_status_data_t
+
+    // --- События хранилища (svc_store публикует их ПОСЛЕ записи в кольцо/снимок) ---
+    EVT_STORE_NOTIFICATION_ADDED,    // -> notify_data (копия записанного)
+    EVT_STORE_NOTIFICATION_REMOVED,  // -> notify_del_data (что удалено; при grp - вся группа)
+    EVT_STORE_EVENT_ADDED,           // -> notify_data
+    EVT_STORE_EVENT_REMOVED,         // -> notify_del_data
+    EVT_STORE_NEWS_ADDED,            // -> notify_data
+    EVT_STORE_STEPS_UPDATED,         // -> motion_step_data_t
+    EVT_STORE_BATTERY_UPDATED,       // -> battery_data_t (только при заметном изменении)
+    EVT_STORE_WEATHER_UPDATED,       // -> weather_snapshot_t (см. svc_store.h)
+    EVT_STORE_RSSI_UPDATED,          // -> int8_t (dBm; INT8_MIN = телефон не подключён)
+    EVT_STORE_MEDIA_UPDATED,         // -> media_data_t
+    EVT_STORE_PHONE_STATUS_UPDATED,  // -> phone_status_data_t
 } app_event_id_t;
 
 // Данные, которые летят вместе с событием
